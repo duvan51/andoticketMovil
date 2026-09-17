@@ -10,7 +10,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import api from '../../services/api';
 import { colors, spacing, borderRadius } from '../../theme/colors';
-import { MessageCircle, Eye, X, Phone, Mail, Tag, ChevronRight, RefreshCw, CalendarClock, Trash2, User2, TrendingUp } from 'lucide-react-native';
+import { MessageCircle, Eye, X, Phone, Mail, Tag, ChevronRight, RefreshCw, CalendarClock, Trash2, User2, TrendingUp, Columns, FileSpreadsheet } from 'lucide-react-native';
+import { ExcelPipelineView } from '../../components/ExcelPipelineView';
 import { format, parseISO } from 'date-fns';
 
 // --- Helper functions ---
@@ -454,6 +455,7 @@ export default function PipelinesScreen() {
   const [showAll, setShowAll] = useState(false);
   const [queues, setQueues] = useState<any[]>([]);
   const [selectedQueueId, setSelectedQueueId] = useState<number | 'none' | 'all'>('all');
+  const [viewMode, setViewMode] = useState<'kanban' | 'excel'>('kanban');
 
   const isAdmin = user?.profile?.toLowerCase() === 'admin' || user?.profile?.toLowerCase() === 'superadmin';
 
@@ -480,6 +482,27 @@ export default function PipelinesScreen() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Socket listeners for real-time ticket updates
+  useEffect(() => {
+    if (!socket) return;
+    const handleTicket = (data: any) => {
+      if (data.action === 'update' || data.action === 'create' || data.action === 'delete') {
+        fetchData();
+      }
+    };
+    const handleAppMessage = (data: any) => {
+      if (data.action === 'create') {
+        fetchData();
+      }
+    };
+    socket.on('ticket', handleTicket);
+    socket.on('appMessage', handleAppMessage);
+    return () => {
+      socket.off('ticket', handleTicket);
+      socket.off('appMessage', handleAppMessage);
+    };
+  }, [socket, fetchData]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -547,6 +570,44 @@ export default function PipelinesScreen() {
     switchBtn: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: borderRadius.sm, backgroundColor: c.border },
     switchBtnActive: { backgroundColor: c.primary },
     switchTxt: { fontSize: 11, fontWeight: '700' },
+
+    // View Mode Switcher
+    modeSwitcherBar: {
+      backgroundColor: c.card,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    modeSegmentContainer: {
+      flexDirection: 'row',
+      backgroundColor: theme === 'dark' ? '#1E293B' : '#E2E8F0',
+      borderRadius: borderRadius.md,
+      padding: 3,
+      gap: 3,
+    },
+    modeBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 8,
+      borderRadius: borderRadius.sm,
+      gap: 6,
+    },
+    modeBtnActive: {
+      backgroundColor: c.primary,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.15,
+      shadowRadius: 2,
+      elevation: 2,
+    },
+    modeBtnText: {
+      fontSize: 12,
+      fontWeight: '700',
+      letterSpacing: 0.2,
+    },
     
     // Queue selector styling
     queueSelector: { maxHeight: 50, borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.card, paddingVertical: 8 },
@@ -607,6 +668,33 @@ export default function PipelinesScreen() {
         </View>
       </View>
 
+      {/* ── View Mode Switcher (Kanban vs Excel) ── */}
+      <View style={st.modeSwitcherBar}>
+        <View style={st.modeSegmentContainer}>
+          <TouchableOpacity
+            style={[st.modeBtn, viewMode === 'kanban' && st.modeBtnActive]}
+            onPress={() => setViewMode('kanban')}
+            activeOpacity={0.7}
+          >
+            <Columns size={15} color={viewMode === 'kanban' ? '#090D16' : c.textMuted} />
+            <Text style={[st.modeBtnText, { color: viewMode === 'kanban' ? '#090D16' : c.textMuted }]}>
+              Vista Pipelines
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[st.modeBtn, viewMode === 'excel' && st.modeBtnActive]}
+            onPress={() => setViewMode('excel')}
+            activeOpacity={0.7}
+          >
+            <FileSpreadsheet size={15} color={viewMode === 'excel' ? '#090D16' : c.textMuted} />
+            <Text style={[st.modeBtnText, { color: viewMode === 'excel' ? '#090D16' : c.textMuted }]}>
+              Vista Excel
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {loading ? (
         <View style={st.loadingContainer}>
           <ActivityIndicator size="large" color={c.primary} />
@@ -656,69 +744,85 @@ export default function PipelinesScreen() {
             </ScrollView>
           </View>
 
-          {/* Horizontal Lane Tab Selector */}
-          <View style={st.laneSelector}>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
-              contentContainerStyle={st.laneScrollContent}
-            >
-              {tags.map((lane, index) => {
-                const count = allTickets.filter(t => {
-                  const matchesTag = t.tags?.some((tg: any) => tg.id === lane.id);
-                  if (!matchesTag) return false;
-                  if (selectedQueueId === 'all') return true;
-                  if (selectedQueueId === 'none') return !t.queueId && !t.queue;
-                  return t.queueId === selectedQueueId || t.queue?.id === selectedQueueId;
-                }).length;
-                const isActive = selectedLaneIndex === index;
-                return (
-                  <TouchableOpacity
-                    key={lane.id}
-                    style={[st.laneTab, isActive && st.laneTabActive]}
-                    onPress={() => setSelectedLaneIndex(index)}
-                  >
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: lane.color || c.primary }} />
-                    <Text style={[st.laneTabTxt, { color: isActive ? '#090D16' : c.text }]}>
-                      {lane.name}
-                    </Text>
-                    <View style={[st.laneBadge, isActive && st.laneBadgeActive]}>
-                      <Text style={[st.laneBadgeTxt, { color: isActive ? c.primary : c.text }]}>
-                        {count}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          {/* Vertical Leads List */}
-          <FlatList
-            data={laneTickets}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={({ item }) => (
-              <LeadCard 
-                ticket={item} 
-                tag={activeLane} 
-                allTags={tags} 
-                onMoved={fetchData} 
-              />
-            )}
-            contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xl * 2 }}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[c.primary]} />
-            }
-            ListEmptyComponent={
-              <View style={st.emptyBox}>
-                <Tag size={40} color={c.textMuted} />
-                <Text style={st.emptyTitle}>Sin leads en esta etapa</Text>
-                <Text style={st.emptySub}>
-                  No hay conversaciones asociadas a la etiqueta "{activeLane?.name || ''}"
-                </Text>
+          {viewMode === 'excel' ? (
+            /* Excel / Spreadsheet Module */
+            <ExcelPipelineView
+              tickets={allTickets}
+              queues={queues}
+              tags={tags}
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              selectedQueueId={selectedQueueId}
+              onSelectQueueId={setSelectedQueueId}
+            />
+          ) : (
+            /* Kanban / Pipelines Module */
+            <>
+              {/* Horizontal Lane Tab Selector */}
+              <View style={st.laneSelector}>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false} 
+                  contentContainerStyle={st.laneScrollContent}
+                >
+                  {tags.map((lane, index) => {
+                    const count = allTickets.filter(t => {
+                      const matchesTag = t.tags?.some((tg: any) => tg.id === lane.id);
+                      if (!matchesTag) return false;
+                      if (selectedQueueId === 'all') return true;
+                      if (selectedQueueId === 'none') return !t.queueId && !t.queue;
+                      return t.queueId === selectedQueueId || t.queue?.id === selectedQueueId;
+                    }).length;
+                    const isActive = selectedLaneIndex === index;
+                    return (
+                      <TouchableOpacity
+                        key={lane.id}
+                        style={[st.laneTab, isActive && st.laneTabActive]}
+                        onPress={() => setSelectedLaneIndex(index)}
+                      >
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: lane.color || c.primary }} />
+                        <Text style={[st.laneTabTxt, { color: isActive ? '#090D16' : c.text }]}>
+                          {lane.name}
+                        </Text>
+                        <View style={[st.laneBadge, isActive && st.laneBadgeActive]}>
+                          <Text style={[st.laneBadgeTxt, { color: isActive ? c.primary : c.text }]}>
+                            {count}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
               </View>
-            }
-          />
+
+              {/* Vertical Leads List */}
+              <FlatList
+                data={laneTickets}
+                keyExtractor={(item) => item.id.toString()}
+                renderItem={({ item }) => (
+                  <LeadCard 
+                    ticket={item} 
+                    tag={activeLane} 
+                    allTags={tags} 
+                    onMoved={fetchData} 
+                  />
+                )}
+                contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xl * 2 }}
+                refreshControl={
+                  <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[c.primary]} />
+                }
+                ListEmptyComponent={
+                  <View style={st.emptyBox}>
+                    <Tag size={40} color={c.textMuted} />
+                    <Text style={st.emptyTitle}>Sin leads en esta etapa</Text>
+                    <Text style={st.emptySub}>
+                      No hay conversaciones asociadas a la etiqueta "{activeLane?.name || ''}"
+                    </Text>
+                  </View>
+                }
+              />
+            </>
+          )}
         </>
       )}
     </SafeAreaView>

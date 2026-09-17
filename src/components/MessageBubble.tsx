@@ -195,7 +195,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   }, [fullMediaUrl, isAudio]);
 
   // Set up the player using the new expo-audio API
-  const player = useAudioPlayer(localAudioUri || '');
+  const player = useAudioPlayer(localAudioUri || null);
   const playerStatus = useAudioPlayerStatus(player);
   
   const [playbackSpeed, setPlaybackSpeed] = useState(1);

@@ -1,5 +1,5 @@
 // src/components/MessageInput.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TextInput, TouchableOpacity, ActivityIndicator, Alert, Text, Platform, Modal, Image, ScrollView, FlatList, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,9 +12,13 @@ import {
   useAudioPlayerStatus,
   useAudioRecorder,
   useAudioRecorderState,
+  useAudioStream,
   AudioModule,
   RecordingPresets,
   setAudioModeAsync,
+  AudioQuality,
+  IOSOutputFormat,
+  RecordingOptions,
 } from 'expo-audio';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -22,6 +26,7 @@ import axios from 'axios';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCompanyCatalogUrl } from '../services/catalog';
 import * as FileSystem from 'expo-file-system/legacy';
+import { RealMp3Recorder } from '../services/mp3Encoder';
 
 interface MessageInputProps {
   ticketId: string;
@@ -80,24 +85,27 @@ const getAudioFileInfoFromUri = (uri: string, mimeTypeOverride?: string) => {
   return { ext, mime };
 };
 
-const WHATSAPP_3GP_RECORDING_PRESET = {
-  extension: Platform.OS === 'web' ? '.webm' : (Platform.OS === 'android' ? '.3gp' : '.m4a'),
-  sampleRate: Platform.OS === 'android' ? 8000 : 44100,
-  numberOfChannels: 1,
-  bitRate: Platform.OS === 'android' ? 12800 : 128000,
+const WHATSAPP_VOICE_PRESET: RecordingOptions = {
+  extension: '.m4a',
+  sampleRate: 44100,
+  numberOfChannels: 1, // CRITICAL: WhatsApp voice notes strictly require Mono (1 channel)
+  bitRate: 64000,
   android: {
-    extension: '.3gp',
-    outputFormat: '3gp' as any,
-    audioEncoder: 'amr_nb' as any,
+    extension: '.m4a',
+    outputFormat: 'mpeg4',
+    audioEncoder: 'aac',
   },
   ios: {
     extension: '.m4a',
-    outputFormat: 'aac ' as any,
-    audioQuality: 0x60,
+    outputFormat: IOSOutputFormat.MPEG4AAC,
+    audioQuality: AudioQuality.HIGH,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
   },
   web: {
-    mimeType: 'audio/webm',
-    bitsPerSecond: 128000,
+    mimeType: 'audio/webm;codecs=opus',
+    bitsPerSecond: 64000,
   },
 };
 
@@ -168,12 +176,36 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
   const [dbImagesSearch, setDbImagesSearch] = useState('');
 
   // Audio Recording State using the new expo-audio API
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorder = useAudioRecorder(WHATSAPP_VOICE_PRESET);
   const recorderState = useAudioRecorderState(recorder);
   const [isRecording, setIsRecording] = useState(false);
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
   const [recordedFileName, setRecordedFileName] = useState('');
   const [showAudioPreview, setShowAudioPreview] = useState(false);
+
+  // Real MP3 streaming recorder
+  const mp3RecorderRef = useRef<RealMp3Recorder>(new RealMp3Recorder(44100));
+  const [streamDuration, setStreamDuration] = useState(0);
+  const streamTimerRef = useRef<any>(null);
+
+  const { stream: audioStream } = useAudioStream({
+    sampleRate: 44100,
+    channels: 1,
+    encoding: 'int16',
+    onBuffer: (buffer) => {
+      if (buffer?.data) {
+        mp3RecorderRef.current.processBuffer(buffer.data, buffer.sampleRate);
+      }
+    },
+  });
+
+  useEffect(() => {
+    return () => {
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+      }
+    };
+  }, []);
 
   // Setup preview player for the recorded audio
   const previewPlayer = useAudioPlayer(recordedUri);
@@ -679,6 +711,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
 
   // Helper to send media files via FormData (supports custom caption/body text)
   const sendMediaMessage = async (uri: string, type: 'image' | 'audio' | 'file', fileName: string, caption = '', mimeType?: string) => {
+    let tempUploadFile: string | null = null;
     try {
       setLoading(true);
       const formData = new FormData();
@@ -694,9 +727,9 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       let fileType = 'application/octet-stream';
 
       if (type === 'audio') {
-        const { ext, mime } = getAudioFileInfoFromUri(uri, mimeType);
-        targetFileName = (fileName && fileName.includes('.')) ? fileName : `audio_${Date.now()}.${ext}`;
-        fileType = mime;
+        const isMp3 = fileName && fileName.toLowerCase().endsWith('.mp3');
+        targetFileName = isMp3 ? fileName : `${Date.now()}.mp3`;
+        fileType = mimeType || 'audio/mp3';
       } else if (type === 'image') {
         fileType = mimeType || 'image/jpeg';
       } else {
@@ -722,28 +755,22 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         }
       }
 
-      let fileData: any;
-      if (Platform.OS === 'web') {
-        const response = await fetch(uri);
-        const blob = await response.blob();
-        fileData = new File([blob], targetFileName, { type: fileType });
-      } else {
-        fileData = {
-          uri: cleanUri,
-          name: targetFileName,
-          type: fileType,
-        };
-      }
-
-      formData.append('medias', fileData);
-
       if (Platform.OS !== 'web') {
         const token = await AsyncStorage.getItem('@whaticket:token');
         const savedApiUrl = (await AsyncStorage.getItem('@whaticket:api_url')) || 'https://api.andoticket.cloud';
         const cleanApiUrl = savedApiUrl.replace(/\/+$/, '');
 
+        let fileToUploadUri = cleanUri;
+        // For audio (or any media), ensure file on disk matches targetFileName so FileSystem.uploadAsync sends the exact filename in multipart headers
+        if (targetFileName && (!cleanUri.endsWith(`/${targetFileName}`) && !cleanUri.endsWith(`\\${targetFileName}`))) {
+          const cacheTargetUri = `${FileSystem.cacheDirectory}${targetFileName}`;
+          await FileSystem.copyAsync({ from: cleanUri, to: cacheTargetUri });
+          fileToUploadUri = cacheTargetUri;
+          tempUploadFile = cacheTargetUri;
+        }
+
         // Use FileSystem.uploadAsync for reliable native file uploads instead of RN's buggy FormData
-        const uploadResult = await FileSystem.uploadAsync(`${cleanApiUrl}/messages/${ticketId}`, cleanUri, {
+        const uploadResult = await FileSystem.uploadAsync(`${cleanApiUrl}/messages/${ticketId}`, fileToUploadUri, {
           fieldName: 'medias',
           httpMethod: 'POST',
           uploadType: FileSystem.FileSystemUploadType.MULTIPART,
@@ -751,7 +778,6 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           parameters: {
             fromMe: 'true',
             body: textCaption || targetFileName,
-            mediaType: type === 'audio' ? 'audio' : (type === 'file' ? 'file' : ''),
             ...(isNote ? { isNote: 'true' } : {})
           },
           headers: {
@@ -764,6 +790,10 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           throw new Error(`Upload failed with status ${uploadResult.status}`);
         }
       } else {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        const fileData = new File([blob], targetFileName, { type: fileType });
+        formData.append('medias', fileData);
         await api.post(`/messages/${ticketId}`, formData);
       }
 
@@ -775,6 +805,9 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       console.error('Error sending media:', error?.message || error);
       Alert.alert('Error', 'No se pudo enviar el archivo adjunto.');
     } finally {
+      if (tempUploadFile) {
+        FileSystem.deleteAsync(tempUploadFile, { idempotent: true }).catch(() => {});
+      }
       setLoading(false);
     }
   };
@@ -785,7 +818,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     await sendMediaMessage(previewUri, 'image', previewFileName, previewCaption);
   };
 
-  // Audio Recording Methods using the new expo-audio API
+  // Audio Recording Methods using the new expo-audio API and real MP3 encoding
   const startRecording = async () => {
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
@@ -801,39 +834,71 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       setRecordedUri(null);
       setRecordedFileName('');
       setShowAudioPreview(false);
+      setStreamDuration(0);
+
       await setAudioModeAsync({
         playsInSilentMode: true,
         allowsRecording: true,
       });
-      await recorder.prepareToRecordAsync(RecordingPresets.HIGH_QUALITY);
-      setIsRecording(true);
-      recorder.record();
+
+      if (Platform.OS !== 'web' && audioStream) {
+        mp3RecorderRef.current.init(44100);
+        await audioStream.start();
+        setIsRecording(true);
+        if (streamTimerRef.current) clearInterval(streamTimerRef.current);
+        streamTimerRef.current = setInterval(() => {
+          setStreamDuration((prev) => prev + 1);
+        }, 1000);
+      } else {
+        await recorder.prepareToRecordAsync(WHATSAPP_VOICE_PRESET);
+        setIsRecording(true);
+        recorder.record();
+      }
     } catch (err) {
       console.error('Failed to start recording', err);
       Alert.alert('Error', 'No se pudo iniciar la grabación de audio.');
       setIsRecording(false);
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+        streamTimerRef.current = null;
+      }
     }
   };
 
   const stopRecording = async () => {
-    if (!recorder) return;
-
     try {
-      await recorder.stop();
       setIsRecording(false);
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+        streamTimerRef.current = null;
+      }
+
       await setAudioModeAsync({
         playsInSilentMode: true,
         allowsRecording: false,
       });
 
-      const uri = recorder.uri;
-      if (uri) {
-        const { ext } = getAudioFileInfoFromUri(uri);
-        const fileName = `audio_${Date.now()}.${ext}`;
-        setRecordedUri(uri);
+      let finalUri: string | null = null;
+      if (Platform.OS !== 'web' && audioStream) {
+        try {
+          audioStream.stop();
+          finalUri = await mp3RecorderRef.current.finalizeToFile();
+        } catch (streamErr) {
+          console.error('Error stopping audioStream, falling back to recorder:', streamErr);
+        }
+      }
+
+      if (!finalUri && recorder) {
+        await recorder.stop();
+        finalUri = recorder.uri;
+      }
+
+      if (finalUri) {
+        const fileName = `${Date.now()}.mp3`;
+        setRecordedUri(finalUri);
         setRecordedFileName(fileName);
         setShowAudioPreview(true);
-        previewPlayer.replace(uri);
+        previewPlayer.replace(finalUri);
       } else {
         Alert.alert('Error', 'No se encontró el audio grabado.');
       }
@@ -852,6 +917,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     setRecordedUri(null);
     setRecordedFileName('');
     setShowAudioPreview(false);
+    setStreamDuration(0);
+    mp3RecorderRef.current.cancel();
   };
 
   const toggleAudioPreview = () => {
@@ -878,15 +945,12 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         }
       }
 
-      const { ext, mime } = getAudioFileInfoFromUri(recordedUri);
-      const fileName = recordedFileName || `audio_${Date.now()}.${ext}`;
-      const captionToSend = text.trim() || '';
-      
+      const fileName = recordedFileName || `${Date.now()}.mp3`;
       const uriToSend = recordedUri;
       clearAudioPreview();
       setText(''); // Clear the text input after sending
 
-      await sendMediaMessage(uriToSend, 'audio', fileName, captionToSend, mime);
+      await sendMediaMessage(uriToSend, 'audio', fileName, '', 'audio/mp3');
     } catch (err) {
       console.error('Error sending recorded audio:', err);
       Alert.alert('Error', 'No se pudo enviar el mensaje de audio.');
@@ -1321,7 +1385,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           <View style={st.recordingIndicator}>
             <View style={st.redDot} />
             <Text style={[st.recordingText, { color: c.textMuted }]}>
-              Grabando audio... {Math.round((recorderState.durationMillis || 0) / 1000)}s
+              Grabando audio... {Platform.OS !== 'web' ? streamDuration : Math.round((recorderState.durationMillis || 0) / 1000)}s
             </Text>
           </View>
         ) : (
