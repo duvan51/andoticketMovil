@@ -1,5 +1,4 @@
-// src/components/ConversationPreviewModal.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { colors, spacing, borderRadius } from '../theme/colors';
+import { MessageBubble } from './MessageBubble';
 import {
   X,
   MessageCircle,
@@ -47,6 +47,7 @@ export function ConversationPreviewModal({
 
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
     if (visible && ticket?.id) {
@@ -373,45 +374,7 @@ export function ConversationPreviewModal({
   });
 
   const renderItem = ({ item }: { item: any }) => {
-    const isNote = item.mediaType === 'note' || item.isNote || item.isPrivate;
-    const fromMe = !!item.fromMe;
-
-    if (isNote) {
-      return (
-        <View style={st.bubbleNote}>
-          <View style={st.noteHeaderRow}>
-            <StickyNote size={14} color={isDark ? '#FBBF24' : '#B45309'} />
-            <Text style={st.noteTitle}>Nota Interna Guardada</Text>
-            <Text style={[st.timeText, { marginLeft: 'auto', color: isDark ? '#FBBF24' : '#B45309' }]}>
-              {formatMessageTime(item.createdAt)}
-            </Text>
-          </View>
-          <Text style={st.noteBodyText}>{item.body || '(Sin texto en la nota)'}</Text>
-        </View>
-      );
-    }
-
-    const bubbleCardStyle = fromMe ? st.bubbleAdvisor : st.bubbleClient;
-    const bubbleWrapperStyle = fromMe ? st.bubbleRight : st.bubbleLeft;
-    const textColor = fromMe
-      ? isDark
-        ? '#ECFDF5'
-        : '#064E3B'
-      : c.text;
-
-    return (
-      <View style={[st.bubbleWrapper, bubbleWrapperStyle]}>
-        <View style={[st.bubbleCard, bubbleCardStyle]}>
-          <Text style={[st.messageText, { color: textColor }]}>
-            {item.body || (item.mediaType ? `[${item.mediaType}]` : '')}
-          </Text>
-          <View style={st.messageFooter}>
-            <Text style={st.timeText}>{formatMessageTime(item.createdAt)}</Text>
-            {fromMe && <CheckCheck size={12} color={isDark ? '#34D399' : '#059669'} />}
-          </View>
-        </View>
-      </View>
-    );
+    return <MessageBubble message={item} />;
   };
 
   return (
@@ -512,11 +475,13 @@ export function ConversationPreviewModal({
               </View>
             ) : messages.length > 0 ? (
               <FlatList
+                ref={flatListRef}
                 data={messages}
                 keyExtractor={(item) => item.id.toString()}
                 renderItem={renderItem}
                 contentContainerStyle={{ paddingVertical: spacing.sm }}
                 showsVerticalScrollIndicator={true}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
               />
             ) : (
               <View style={st.emptyCenter}>

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type ContactLike = {
@@ -108,9 +109,12 @@ export const ContactAvatar: React.FC<ContactAvatarProps> = ({
   return (
     <View style={[styles.avatar, { width: size, height: size, borderRadius, backgroundColor }, style]}>
       {picUrl && !imageFailed ? (
-        <Image
+        <ExpoImage
           source={{ uri: picUrl }}
           style={{ width: size, height: size, borderRadius }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={150}
           onError={() => setImageFailed(true)}
         />
       ) : (

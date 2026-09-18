@@ -14,7 +14,7 @@ import { ContactAvatar } from '../../components/ContactAvatar';
 import { colors, spacing, borderRadius } from '../../theme/colors';
 import {
   Search, MessageSquare, Clock, UserPlus, X, Users, Bell,
-  SlidersHorizontal, Tag, User2, Layers, Check, ChevronRight, Trash2, CalendarClock, Building2
+  SlidersHorizontal, Tag, User2, Layers, Check, ChevronRight, Trash2, CalendarClock, Building2, Mail
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { format, parseISO } from 'date-fns';
@@ -206,15 +206,6 @@ export default function ChatsScreen() {
 
   // ── External tickets ──────────────────────────────
   const [tickets, setTickets] = useState<any[]>([]);
-  const sortedTickets = useMemo(() => {
-    return [...tickets]
-      .filter(t => !t.isGroup)
-      .sort((a, b) => {
-        const timeA = new Date(a.updatedAt || a.updated_at || 0).getTime();
-        const timeB = new Date(b.updatedAt || b.updated_at || 0).getTime();
-        return timeB - timeA;
-      });
-  }, [tickets]);
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -232,12 +223,29 @@ export default function ChatsScreen() {
   const [filterQueue, setFilterQueue] = useState<any | null>(null);
   const [filterUser, setFilterUser] = useState<string>('');
   const [showAll, setShowAll] = useState<boolean>(false);
+  const [filterUnread, setFilterUnread] = useState<boolean>(false);
   // Sheet open states
   const [tagSheetOpen, setTagSheetOpen] = useState(false);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [userSheetOpen, setUserSheetOpen] = useState(false);
 
   const activeFilterCount = [filterTag, filterQueue, filterUser].filter(Boolean).length;
+
+  const unreadOpenCount = useMemo(() => {
+    return tickets.filter(t => !t.isGroup && (t.unreadMessages || 0) > 0).length;
+  }, [tickets]);
+
+  const sortedTickets = useMemo(() => {
+    let list = [...tickets].filter(t => !t.isGroup);
+    if (filterUnread) {
+      list = list.filter(t => (t.unreadMessages || 0) > 0);
+    }
+    return list.sort((a, b) => {
+      const timeA = new Date(a.updatedAt || a.updated_at || 0).getTime();
+      const timeB = new Date(b.updatedAt || b.updated_at || 0).getTime();
+      return timeB - timeA;
+    });
+  }, [tickets, filterUnread]);
 
   // ── Internal chats ────────────────────────────────
   const [internalTickets, setInternalTickets] = useState<any[]>([]);
@@ -310,6 +318,7 @@ export default function ChatsScreen() {
       if (queueIds) params.queueIds = queueIds;
       if (filterTag) params.tags = JSON.stringify([filterTag.id]);
       if (filterUser) params.userId = filterUser;
+      if (filterUnread) params.withUnreadMessages = 'true';
 
       if (statusTab === 'open') {
         // Execute parallel requests for answered (unanswered: 'false') and unanswered (unanswered: 'true') open tickets
@@ -389,7 +398,7 @@ export default function ChatsScreen() {
       setLoadingMore(false);
       setRefreshing(false);
     }
-  }, [statusTab, filterTag, filterQueue, filterUser, showAll, user?.queues, searchQuery]);
+  }, [statusTab, filterTag, filterQueue, filterUser, showAll, user?.queues, searchQuery, filterUnread]);
 
   // ================================================
   // FETCH INTERNAL / NOTIFICATIONS / USERS
@@ -512,7 +521,7 @@ export default function ChatsScreen() {
       fetchInternalTickets();
       fetchGroups();
     }
-  }, [isAuth, statusTab, filterTag, filterQueue, filterUser, showAll]);
+  }, [isAuth, statusTab, filterTag, filterQueue, filterUser, showAll, filterUnread]);
 
   useEffect(() => {
     if (!isAuth) return;
@@ -542,7 +551,13 @@ export default function ChatsScreen() {
 
   };
 
-  const clearFilters = () => { setFilterTag(null); setFilterQueue(null); setFilterUser(''); setShowAll(isAdmin); };
+  const clearFilters = () => {
+    setFilterTag(null);
+    setFilterQueue(null);
+    setFilterUser('');
+    setShowAll(isAdmin);
+    setFilterUnread(false);
+  };
 
   // ================================================
   // SOCKET EVENTS
@@ -931,7 +946,10 @@ export default function ChatsScreen() {
             <TouchableOpacity
               key={tab}
               style={[st.tab, statusTab === tab && st.activeTab]}
-              onPress={() => setStatusTab(tab)}
+              onPress={() => {
+                setStatusTab(tab);
+                if (tab !== 'open') setFilterUnread(false);
+              }}
               activeOpacity={0.7}
             >
               <IconComponent size={16} color={statusTab === tab ? c.primary : c.text} style={{ marginRight: 4 }} />
@@ -940,6 +958,39 @@ export default function ChatsScreen() {
           );
         })}
       </View>
+
+      {/* ── Sub-Filter Bar for Open Chats (Todos / No leídos) ── */}
+      {statusTab === 'open' && (
+        <View style={st.openSubFilterBar}>
+          <TouchableOpacity
+            style={[st.openFilterPill, !filterUnread && st.openFilterPillActive]}
+            onPress={() => setFilterUnread(false)}
+            activeOpacity={0.7}
+          >
+            <Text style={[st.openFilterPillText, !filterUnread && st.openFilterPillTextActive]}>
+              Todos
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[st.openFilterPill, filterUnread && st.openFilterPillActive]}
+            onPress={() => setFilterUnread(u => !u)}
+            activeOpacity={0.7}
+          >
+            <Mail size={13} color={filterUnread ? '#090D16' : c.textMuted} style={{ marginRight: 5 }} />
+            <Text style={[st.openFilterPillText, filterUnread && st.openFilterPillTextActive]}>
+              No leídos
+            </Text>
+            {unreadOpenCount > 0 && (
+              <View style={[st.unreadPillBadge, filterUnread && st.unreadPillBadgeActive, { marginLeft: 5 }]}>
+                <Text style={[st.unreadPillBadgeText, filterUnread && st.unreadPillBadgeTextActive]}>
+                  {unreadOpenCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* ── INTERNAL TAB ── */}
       {statusTab === 'internal' ? (
@@ -1002,10 +1053,23 @@ export default function ChatsScreen() {
               <MessageSquare size={48} color={c.border} style={{ marginBottom: spacing.md }} />
               <Text style={st.emptyTitle}>No hay conversaciones</Text>
               <Text style={st.emptySubtitle}>
-                {searchQuery || activeFilterCount > 0
+                {filterUnread
+                  ? 'No tienes chats abiertos con mensajes sin leer.'
+                  : searchQuery || activeFilterCount > 0
                   ? 'No se encontraron chats con los filtros aplicados.'
                   : `No tienes chats ${statusTab === 'open' ? 'abiertos' : 'pendientes'} en este momento.`}
               </Text>
+              {filterUnread && (
+                <TouchableOpacity
+                  style={[st.openFilterPill, { marginTop: spacing.md, backgroundColor: c.primary, borderColor: c.primary }]}
+                  onPress={() => setFilterUnread(false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[st.openFilterPillText, { color: '#090D16', fontWeight: '700' }]}>
+                    Ver todos los chats abiertos
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           }
           contentContainerStyle={[st.listContent, tickets.length === 0 && { flexGrow: 1 }]}
@@ -1276,6 +1340,60 @@ function buildStyles(c: typeof colors['dark'], insets: any) {
     activeTab: { borderBottomColor: c.primary },
     tabText: { fontSize: 13, fontWeight: '600', color: c.textMuted },
     activeTabText: { color: c.primary },
+    // Open chats sub-filter bar (Todos / No leídos)
+    openSubFilterBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.md,
+      paddingVertical: 8,
+      gap: 8,
+      backgroundColor: c.card,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    openFilterPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
+      backgroundColor: c.background,
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    openFilterPillActive: {
+      backgroundColor: c.primary,
+      borderColor: c.primary,
+    },
+    openFilterPillText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: c.textMuted,
+    },
+    openFilterPillTextActive: {
+      color: '#090D16',
+      fontWeight: '700',
+    },
+    unreadPillBadge: {
+      backgroundColor: c.primary,
+      borderRadius: 10,
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      minWidth: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    unreadPillBadgeActive: {
+      backgroundColor: '#090D16',
+    },
+    unreadPillBadgeText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: '#090D16',
+    },
+    unreadPillBadgeTextActive: {
+      color: c.primary,
+    },
     // Internal
     newInternalBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, margin: spacing.md, padding: spacing.md, borderRadius: borderRadius.md, backgroundColor: c.primary },
     newInternalBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },

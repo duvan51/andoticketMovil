@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Image, TouchableOpacity, ActivityIndicator, Modal, Linking, Platform, Alert } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, borderRadius } from '../theme/colors';
 import { format, parseISO } from 'date-fns';
-import { Check, CheckCheck, Clock, Play, Pause, AlertCircle, FileText, X } from 'lucide-react-native';
+import { Check, CheckCheck, Clock, Play, Pause, AlertCircle, FileText, X, Mic } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../context/AuthContext';
+import { AdReplyCard } from './AdReplyCard';
 
 interface Message {
   id: string;
@@ -19,11 +21,64 @@ interface Message {
   isDeleted?: boolean;
   isPrivate?: boolean;
   isNote?: boolean;
+  adReply?: string | null;
 }
 
 interface MessageBubbleProps {
   message: Message;
 }
+
+export const isMediaPlaceholder = (text?: string | null) => {
+  if (!text) return false;
+  const lower = text.toLowerCase().trim();
+  return (
+    lower.includes('archivo multimedia') ||
+    lower.includes('no se pudo descargar') ||
+    lower.includes('media omitted') ||
+    lower.includes('omitted') ||
+    lower === '[imagen]' ||
+    lower === '[audio]' ||
+    lower === '[archivo]' ||
+    lower === '[video]'
+  );
+};
+
+export const isAudioFilename = (text?: string | null) => {
+  if (!text || isMediaPlaceholder(text)) return false;
+  const clean = text.split('?')[0].toLowerCase().trim();
+  return (
+    clean.endsWith('.mp3') ||
+    clean.endsWith('.ogg') ||
+    clean.endsWith('.opus') ||
+    clean.endsWith('.m4a') ||
+    clean.endsWith('.wav') ||
+    clean.endsWith('.aac') ||
+    clean.endsWith('.webm') ||
+    clean.endsWith('.amr') ||
+    clean.endsWith('.3gp')
+  );
+};
+
+export const isImageFile = (text?: string | null) => {
+  if (!text || isMediaPlaceholder(text)) return false;
+  const clean = text.split('?')[0].toLowerCase().trim();
+  return (
+    clean.endsWith('.jpg') ||
+    clean.endsWith('.jpeg') ||
+    clean.endsWith('.png') ||
+    clean.endsWith('.webp') ||
+    clean.endsWith('.gif') ||
+    clean.endsWith('.bmp')
+  );
+};
+
+export const isImageFilename = (text?: string | null) => {
+  if (!text || isMediaPlaceholder(text)) return false;
+  if (text.includes(' ')) return false;
+  const filenameRegex = /^[a-zA-Z0-9_\-]+\.(jpg|jpeg|png|gif|webp|pdf|mp3|ogg|wav|mp4|avi|opus|m4a|aac|webm|amr)$/i;
+  const timestampFileRegex = /^\d+_.+\.\w+$/;
+  return filenameRegex.test(text) || timestampFileRegex.test(text);
+};
 
 const getFullMediaUrl = (url: string | undefined, baseUrl: string) => {
   if (!url || typeof url !== 'string') return '';
@@ -41,17 +96,20 @@ const getFullMediaUrl = (url: string | undefined, baseUrl: string) => {
 let globalActivePlayer: any = null;
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
-  const { theme, apiUrl } = useAuth();
+  const { theme, apiUrl, token } = useAuth();
   const c = colors[theme];
 
-  const { body, createdAt, fromMe, ack, mediaType, mediaUrl, isDeleted, isPrivate, isNote } = message;
+  const { body, createdAt, fromMe, ack, mediaType, mediaUrl, isDeleted, isPrivate, isNote, adReply } = message;
+
+  const isBodyAudio = Boolean(body && !isMediaPlaceholder(body) && (isAudioFilename(body) || (body.includes('/') && !body.includes(' ') && isAudioFilename(body))));
+  const isBodyImage = Boolean(body && !isMediaPlaceholder(body) && (isImageFile(body) || (isImageFilename(body) && !body.includes(' '))));
 
   const rawMediaUrl = mediaUrl || (
-    (mediaType === 'audio' || mediaType === 'audio-record' || mediaType === 'ptt' || mediaType === 'voice' || mediaType?.startsWith('audio') || (body && (body.toLowerCase().endsWith('.mp3') || body.toLowerCase().endsWith('.ogg') || body.toLowerCase().endsWith('.m4a') || body.toLowerCase().endsWith('.wav') || body.toLowerCase().endsWith('.opus') || body.toLowerCase().endsWith('.webm') || body.toLowerCase().endsWith('.aac') || body.toLowerCase().endsWith('.amr'))))
-      ? (body && (body.includes('/') || body.includes('.')) ? body : undefined)
-      : (body && (body.toLowerCase().endsWith('.jpg') || body.toLowerCase().endsWith('.jpeg') || body.toLowerCase().endsWith('.png') || body.toLowerCase().endsWith('.webp') || body.toLowerCase().endsWith('.gif'))
-        ? body
-        : undefined)
+    (mediaType === 'audio' || mediaType === 'audio-record' || mediaType === 'ptt' || mediaType === 'voice' || mediaType?.startsWith('audio'))
+      ? (isBodyAudio ? body : undefined)
+      : (mediaType === 'image' || mediaType?.startsWith('image'))
+        ? (isBodyImage ? body : undefined)
+        : (isBodyAudio || isBodyImage ? body : undefined)
   );
 
   const fullMediaUrl = getFullMediaUrl(rawMediaUrl, apiUrl);
@@ -162,7 +220,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         // 3. Try downloading backend-converted MP3 version first (for iOS & native player compatibility)
         if (isOggOrOpus) {
           try {
-            const mp3Download = await FileSystem.downloadAsync(mp3MediaUrl, mp3LocalPath);
+            const mp3Download = await FileSystem.downloadAsync(mp3MediaUrl, mp3LocalPath, {
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
             if (isMounted && mp3Download.status === 200) {
               setLocalAudioUri(mp3Download.uri);
               return;
@@ -173,7 +233,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         }
 
         // 4. Download original URL
-        const downloadResult = await FileSystem.downloadAsync(fullMediaUrl, oggLocalPath);
+        const downloadResult = await FileSystem.downloadAsync(fullMediaUrl, oggLocalPath, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
         if (isMounted && downloadResult.status === 200) {
           setLocalAudioUri(downloadResult.uri);
         } else if (isMounted) {
@@ -326,14 +388,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   };
 
-  const isImageFilename = (text: string) => {
-    if (!text) return false;
-    if (text.includes(' ')) return false;
-    const filenameRegex = /^[a-zA-Z0-9_\-]+\.(jpg|jpeg|png|gif|webp|pdf|mp3|ogg|wav|mp4|avi|opus|m4a|aac|webm|amr)$/i;
-    const timestampFileRegex = /^\d+_.+\.\w+$/;
-    return filenameRegex.test(text) || timestampFileRegex.test(text);
-  };
-
   const handleDownloadFile = async () => {
     if (!fullMediaUrl) return;
 
@@ -433,7 +487,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
   // Render internal agent comments/notes
   if (isPrivateNote) {
-    const hasNoteCaption = body && body.trim() !== '' && !isImageFilename(body) && mediaType !== 'note';
+    const hasNoteCaption = body && body.trim() !== '' && !isImageFilename(body) && !isMediaPlaceholder(body) && mediaType !== 'note';
 
     // Note text colors (fixed for the yellow note background)
     const noteTextColor = '#78350F';
@@ -447,7 +501,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           {/* Media inside the Note */}
           {isImage && (
             <TouchableOpacity onPress={() => setImageViewerOpen(true)} activeOpacity={0.9}>
-              <Image source={{ uri: fullMediaUrl }} style={[st.mediaImage, { width: '100%', height: 160 }]} resizeMode="cover" />
+              <ExpoImage
+                source={{
+                  uri: fullMediaUrl,
+                  headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                }}
+                style={[st.mediaImage, { width: '100%', height: 160 }]}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={200}
+              />
             </TouchableOpacity>
           )}
 
@@ -526,7 +589,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                 </View>
                 {/* Image box */}
                 <View style={st.viewerImageBox}>
-                  <Image source={{ uri: fullMediaUrl }} style={st.viewerFullImage} resizeMode="contain" />
+                  <ExpoImage
+                    source={{
+                      uri: fullMediaUrl,
+                      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                    }}
+                    style={st.viewerFullImage}
+                    contentFit="contain"
+                    cachePolicy="memory-disk"
+                  />
                 </View>
               </SafeAreaView>
             </TouchableOpacity>
@@ -544,14 +615,60 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     ? (theme === 'light' ? 'rgba(15, 23, 42, 0.65)' : 'rgba(255, 255, 255, 0.75)')
     : c.textMuted;
 
-  const hasCaption = body && body.trim() !== '' && !isImageFilename(body) && body !== rawMediaUrl && body !== fullMediaUrl;
+  const hasCaption = body && body.trim() !== '' && !isImageFilename(body) && !isMediaPlaceholder(body) && body !== rawMediaUrl && body !== fullMediaUrl;
+
+  const isMediaError = !fullMediaUrl && (
+    isMediaPlaceholder(body) ||
+    (Boolean(mediaType) && ['image', 'audio', 'video', 'document', 'audio-record', 'ptt'].includes((mediaType || '').toLowerCase()))
+  );
 
   return (
     <View style={[st.bubble, fromMe ? st.bubbleSelf : st.bubbleOther]}>
+      {/* Tarjeta de anuncio de Meta Ads (adReply) */}
+      {adReply ? (
+        <AdReplyCard adReplyString={adReply} />
+      ) : null}
+
+      {/* Media Error Placeholder Banner (when media is missing or could not be downloaded) */}
+      {isMediaError && (
+        <View style={[st.mediaErrorContainer, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(0, 0, 0, 0.05)' }]}>
+          <View style={[st.mediaErrorIconBox, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.07)' }]}>
+            {mediaType?.startsWith('audio') || mediaType === 'ptt' || mediaType === 'voice' ? (
+              <Mic size={18} color={c.textMuted} />
+            ) : mediaType?.startsWith('image') ? (
+              <AlertCircle size={18} color={c.textMuted} />
+            ) : (
+              <FileText size={18} color={c.textMuted} />
+            )}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[st.mediaErrorTitle, { color: bubbleTextColor }]}>
+              {mediaType?.startsWith('audio') || mediaType === 'ptt' || mediaType === 'voice'
+                ? 'Audio no disponible'
+                : mediaType?.startsWith('image')
+                  ? 'Imagen no disponible'
+                  : 'Archivo no disponible'}
+            </Text>
+            <Text style={[st.mediaErrorSub, { color: bubbleTimeColor }]}>
+              No se pudo descargar de WhatsApp
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* Media Rendering */}
       {isImage && (
         <TouchableOpacity onPress={() => setImageViewerOpen(true)} activeOpacity={0.9}>
-          <Image source={{ uri: fullMediaUrl }} style={[st.mediaImage, !hasCaption && { marginBottom: 2 }]} resizeMode="cover" />
+          <ExpoImage
+            source={{
+              uri: fullMediaUrl,
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            }}
+            style={[st.mediaImage, !hasCaption && { marginBottom: 2 }]}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={200}
+          />
         </TouchableOpacity>
       )}
 
@@ -601,8 +718,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         </TouchableOpacity>
       )}
 
-      {/* Normal Text Body (rendered if not a pure voice/document note or alongside media) */}
-      {(!fullMediaUrl || isImage) && hasCaption && !isAudio && !isFile && (
+      {/* Normal Text Body (rendered if not a pure voice/document note or alongside media, and not an error placeholder) */}
+      {(!fullMediaUrl || isImage) && hasCaption && !isAudio && !isFile && !isMediaError && (
         <Text style={[st.bodyText, { color: bubbleTextColor }]}>{body}</Text>
       )}
 
@@ -625,7 +742,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
               </View>
               {/* Image box */}
               <View style={st.viewerImageBox}>
-                <Image source={{ uri: fullMediaUrl }} style={st.viewerFullImage} resizeMode="contain" />
+                <ExpoImage
+                  source={{
+                    uri: fullMediaUrl,
+                    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                  }}
+                  style={st.viewerFullImage}
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                />
               </View>
             </SafeAreaView>
           </TouchableOpacity>
@@ -684,6 +809,7 @@ function buildStyles(c: typeof colors['dark'], fromMe: boolean) {
       height: 160,
       borderRadius: borderRadius.sm,
       marginBottom: spacing.sm,
+      backgroundColor: c.border,
     },
     audioContainer: {
       flexDirection: 'row',
@@ -832,6 +958,30 @@ function buildStyles(c: typeof colors['dark'], fromMe: boolean) {
     viewerFullImage: {
       width: '100%',
       height: '100%',
+    },
+    mediaErrorContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      padding: spacing.sm,
+      borderRadius: borderRadius.sm,
+      marginBottom: spacing.xs,
+      minWidth: 200,
+    },
+    mediaErrorIconBox: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    mediaErrorTitle: {
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    mediaErrorSub: {
+      fontSize: 11,
+      marginTop: 1,
     },
   });
 }

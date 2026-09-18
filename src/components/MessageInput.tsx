@@ -1,10 +1,11 @@
 // src/components/MessageInput.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, TextInput, TouchableOpacity, ActivityIndicator, Alert, Text, Platform, Modal, Image, ScrollView, FlatList, Keyboard } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, spacing, borderRadius } from '../theme/colors';
-import { Send, Paperclip, Mic, Square, StickyNote, X, PlusCircle, CalendarClock, Sparkles, ShoppingBag, Play, Pause, Trash2, Zap, FileSignature, Database, Image as ImageIcon, Upload } from 'lucide-react-native';
+import { Send, Paperclip, Mic, Square, StickyNote, X, PlusCircle, CalendarClock, Sparkles, ShoppingBag, Play, Pause, Trash2, Zap, FileSignature, Database, Image as ImageIcon, Upload, Check, CheckSquare } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import {
@@ -155,8 +156,145 @@ const WebTimePicker = ({ value, onChange, themeColors, theme }: any) => {
   });
 };
 
+const getDbImageFullUrl = (url: string | undefined, baseUrl: string) => {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('file://') || trimmed.startsWith('data:')) {
+    return trimmed;
+  }
+  const cleanBase = (baseUrl || 'https://api.andoticket.cloud').replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  const cleanPath = trimmed.replace(/^\/+/, '');
+  if (cleanPath.startsWith('public/') || cleanPath.startsWith('api/')) {
+    return `${cleanBase}/${cleanPath}`;
+  }
+  return `${cleanBase}/public/${cleanPath}`;
+};
+
+export interface PreviewImageItem {
+  uri: string;
+  fileName: string;
+  caption?: string;
+  isMediaGallery?: boolean;
+  rawId?: string | number;
+}
+
+interface DbGalleryImageCardProps {
+  item: any;
+  c: any;
+  token?: string | null;
+  isSelected?: boolean;
+  isMultiSelectMode?: boolean;
+  onSelect: (item: any) => void;
+  onToggleSelect?: (item: any) => void;
+}
+
+const DbGalleryImageCard: React.FC<DbGalleryImageCardProps> = ({ 
+  item, 
+  c, 
+  token, 
+  isSelected = false, 
+  isMultiSelectMode = false, 
+  onSelect,
+  onToggleSelect,
+}) => {
+  const [loading, setLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
+  const handleCardPress = () => {
+    if (isMultiSelectMode && onToggleSelect) {
+      onToggleSelect(item);
+    } else {
+      onSelect(item);
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={{
+        flex: 0.5,
+        margin: spacing.xs,
+        backgroundColor: c.card,
+        borderRadius: borderRadius.md,
+        borderWidth: isSelected ? 2 : 1,
+        borderColor: isSelected ? c.primary : c.border,
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+      onPress={handleCardPress}
+      onLongPress={() => onToggleSelect && onToggleSelect(item)}
+      activeOpacity={0.8}
+    >
+      <View style={{ width: '100%', height: 130, backgroundColor: c.border, justifyContent: 'center', alignItems: 'center' }}>
+        {hasError ? (
+          <View style={{ alignItems: 'center', padding: spacing.xs }}>
+            <ImageIcon size={30} color={c.textMuted} />
+            <Text style={{ color: c.textMuted, fontSize: 10, marginTop: 4, textAlign: 'center' }} numberOfLines={1}>
+              No disponible
+            </Text>
+          </View>
+        ) : (
+          <>
+            <ExpoImage
+              source={{
+                uri: item.url,
+                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              }}
+              style={{ width: '100%', height: 130 }}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={200}
+              onLoadStart={() => setLoading(true)}
+              onLoad={() => setLoading(false)}
+              onError={(e) => {
+                console.warn('[DbGalleryImageCard] Error cargando imagen:', item.url, e?.error);
+                setLoading(false);
+                setHasError(true);
+              }}
+            />
+            {loading && (
+              <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.08)' }]}>
+                <ActivityIndicator size="small" color={c.primary} />
+              </View>
+            )}
+          </>
+        )}
+
+        {/* Checkbox button on the top-right corner */}
+        <TouchableOpacity
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: 6,
+            width: 26,
+            height: 26,
+            borderRadius: 13,
+            backgroundColor: isSelected ? c.primary : 'rgba(0, 0, 0, 0.45)',
+            borderWidth: isSelected ? 0 : 1.5,
+            borderColor: '#FFFFFF',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 10,
+          }}
+          onPress={() => onToggleSelect && onToggleSelect(item)}
+          activeOpacity={0.7}
+        >
+          {isSelected && <Check size={16} color="#090D16" strokeWidth={3} />}
+        </TouchableOpacity>
+      </View>
+      <View style={{ padding: 8, width: '100%' }}>
+        <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text style={{ fontSize: 10, color: c.textMuted, marginTop: 2 }}>
+          {item.source}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId }) => {
-  const { theme, user } = useAuth();
+  const { theme, user, apiUrl, token } = useAuth();
   const c = colors[theme];
 
   const [text, setText] = useState('');
@@ -174,6 +312,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
   const [dbImages, setDbImages] = useState<any[]>([]);
   const [loadingDbImages, setLoadingDbImages] = useState(false);
   const [dbImagesSearch, setDbImagesSearch] = useState('');
+  const [selectedDbImageIds, setSelectedDbImageIds] = useState<string[]>([]);
+  const [isMultiSelectDbMode, setIsMultiSelectDbMode] = useState(false);
 
   // Audio Recording State using the new expo-audio API
   const recorder = useAudioRecorder(WHATSAPP_VOICE_PRESET);
@@ -222,6 +362,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [previewFileName, setPreviewFileName] = useState('');
   const [previewCaption, setPreviewCaption] = useState('');
+  const [previewItems, setPreviewItems] = useState<PreviewImageItem[]>([]);
+  const [activePreviewIndex, setActivePreviewIndex] = useState<number>(0);
 
   // Scheduled Message Local State (from input bar)
   const [schedModalOpen, setSchedModalOpen] = useState(false);
@@ -488,15 +630,20 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: false,
+        allowsMultipleSelection: true,
         quality: 0.8,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const selectedAsset = result.assets[0];
-        // Open Preview Modal with custom caption support (prefilled with current text)
-        setPreviewUri(selectedAsset.uri);
-        setPreviewFileName(selectedAsset.fileName || 'photo.jpg');
+        const items: PreviewImageItem[] = result.assets.map((asset, idx) => ({
+          uri: asset.uri,
+          fileName: asset.fileName || `photo_${Date.now()}_${idx + 1}.jpg`,
+        }));
+
+        setPreviewItems(items);
+        setActivePreviewIndex(0);
+        setPreviewUri(items[0].uri);
+        setPreviewFileName(items[0].fileName);
         setPreviewCaption(text);
         setPreviewVisible(true);
       }
@@ -545,6 +692,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       const imagesList: any[] = [];
       const seenUrls = new Set<string>();
 
+      const savedApiUrl = (await AsyncStorage.getItem('@whaticket:api_url')) || apiUrl || 'https://api.andoticket.cloud';
+
       // 1. Primary: Fetch images from Whaticket Media Gallery (/media-gallery)
       try {
         const response = await api.get('/media-gallery', {
@@ -560,20 +709,17 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           : (galleryData?.media || galleryData?.records || galleryData?.data || []);
 
         items.forEach((item: any) => {
-          if (item.mediaUrl || item.url) {
-            const mediaPath = item.mediaUrl || item.url;
-            const cleanBase = (api.defaults.baseURL || '').replace(/\/api\/?$/, '');
-            const fullUrl = mediaPath.startsWith('http') 
-              ? mediaPath 
-              : `${cleanBase}/${mediaPath.replace(/^\/+/, '')}`;
+          const rawPath = item.mediaUrl || item.url || item.path || item.filename || item.fileName || item.media || item.file;
+          if (rawPath) {
+            const fullUrl = getDbImageFullUrl(rawPath, savedApiUrl);
             
-            if (!seenUrls.has(fullUrl)) {
+            if (fullUrl && !seenUrls.has(fullUrl)) {
               seenUrls.add(fullUrl);
               imagesList.push({
-                id: `mg-${item.id}`,
-                title: item.title || item.name || 'Galería Whaticket',
+                id: `mg-${item.id || Math.random()}`,
+                title: item.title || item.name || item.filename || 'Galería Whaticket',
                 url: fullUrl,
-                caption: item.caption || '',
+                caption: item.caption || item.description || '',
                 source: 'Galería Whaticket',
                 isMediaGallery: true,
                 rawId: item.id,
@@ -596,9 +742,8 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
             if (parsed.hasMedia && parsed.mediaUrl) {
               const lower = parsed.mediaUrl.toLowerCase();
               if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp') || lower.endsWith('.gif') || parsed.mimeType?.startsWith('image')) {
-                const cleanBase = (api.defaults.baseURL || '').replace(/\/api\/?$/, '');
-                const fullUrl = parsed.mediaUrl.startsWith('http') ? parsed.mediaUrl : `${cleanBase}/${parsed.mediaUrl.replace(/^\/+/, '')}`;
-                if (!seenUrls.has(fullUrl)) {
+                const fullUrl = getDbImageFullUrl(parsed.mediaUrl, savedApiUrl);
+                if (fullUrl && !seenUrls.has(fullUrl)) {
                   seenUrls.add(fullUrl);
                   imagesList.push({
                     id: `qa-${qa.id}`,
@@ -620,6 +765,14 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       }
 
       setDbImages(imagesList);
+
+      // Background prefetch all gallery images into persistent disk cache for instant loading
+      const urlsToPrefetch = imagesList.map((item: any) => item.url).filter(Boolean);
+      if (urlsToPrefetch.length > 0) {
+        ExpoImage.prefetch(urlsToPrefetch, 'memory-disk').catch((e) => {
+          console.log('Background gallery prefetch note:', e);
+        });
+      }
     } catch (err) {
       console.error('Error opening DB images modal:', err);
     } finally {
@@ -627,21 +780,77 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     }
   };
 
+  const handleToggleSelectDbImage = (item: any) => {
+    setSelectedDbImageIds(prev => {
+      const exists = prev.includes(item.id);
+      const next = exists ? prev.filter(id => id !== item.id) : [...prev, item.id];
+      if (next.length > 0 && !isMultiSelectDbMode) {
+        setIsMultiSelectDbMode(true);
+      } else if (next.length === 0 && isMultiSelectDbMode) {
+        setIsMultiSelectDbMode(false);
+      }
+      return next;
+    });
+  };
+
+  const handleConfirmMultiSelectDbImages = () => {
+    const selectedItems = dbImages.filter(img => selectedDbImageIds.includes(img.id));
+    if (selectedItems.length === 0) return;
+
+    setDbImagesModalOpen(false);
+
+    const items: PreviewImageItem[] = selectedItems.map((img, idx) => ({
+      uri: img.url,
+      fileName: img.isMediaGallery && img.rawId ? `media-gallery-${img.rawId}.jpg` : `db-image-${Date.now()}-${idx + 1}.jpg`,
+      caption: img.caption || '',
+      isMediaGallery: img.isMediaGallery,
+      rawId: img.rawId,
+    }));
+
+    setPreviewItems(items);
+    setActivePreviewIndex(0);
+    setPreviewUri(items[0].uri);
+    setPreviewFileName(items[0].fileName);
+    setPreviewCaption(items[0].caption || text);
+    setPreviewVisible(true);
+  };
+
+  const handleRemovePreviewItem = (index: number) => {
+    const updated = previewItems.filter((_, i) => i !== index);
+    if (updated.length === 0) {
+      setPreviewVisible(false);
+      setPreviewItems([]);
+      setPreviewUri(null);
+      return;
+    }
+    const nextIndex = index >= updated.length ? updated.length - 1 : index;
+    setPreviewItems(updated);
+    setActivePreviewIndex(nextIndex);
+    setPreviewUri(updated[nextIndex].uri);
+    setPreviewFileName(updated[nextIndex].fileName);
+  };
+
   const handleSelectDbImage = async (imgItem: any) => {
+    if (isMultiSelectDbMode) {
+      handleToggleSelectDbImage(imgItem);
+      return;
+    }
     setDbImagesModalOpen(false);
     
-    if (imgItem.isMediaGallery && imgItem.rawId) {
-      // Open preview modal prefilled with item caption or user text
-      setPreviewUri(imgItem.url);
-      setPreviewFileName(`media-gallery-${imgItem.rawId}.jpg`);
-      setPreviewCaption(imgItem.caption || text);
-      setPreviewVisible(true);
-    } else {
-      setPreviewUri(imgItem.url);
-      setPreviewFileName(`db-image-${Date.now()}.jpg`);
-      setPreviewCaption(imgItem.caption || text);
-      setPreviewVisible(true);
-    }
+    const singleItem: PreviewImageItem = {
+      uri: imgItem.url,
+      fileName: imgItem.isMediaGallery && imgItem.rawId ? `media-gallery-${imgItem.rawId}.jpg` : `db-image-${Date.now()}.jpg`,
+      caption: imgItem.caption || '',
+      isMediaGallery: imgItem.isMediaGallery,
+      rawId: imgItem.rawId,
+    };
+
+    setPreviewItems([singleItem]);
+    setActivePreviewIndex(0);
+    setPreviewUri(singleItem.uri);
+    setPreviewFileName(singleItem.fileName);
+    setPreviewCaption(imgItem.caption || text);
+    setPreviewVisible(true);
   };
 
   const handleUploadToMediaGallery = async () => {
@@ -761,10 +970,32 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         const cleanApiUrl = savedApiUrl.replace(/\/+$/, '');
 
         let fileToUploadUri = cleanUri;
+        const isRemoteUrl = cleanUri.startsWith('http://') || cleanUri.startsWith('https://');
+
         // For audio (or any media), ensure file on disk matches targetFileName so FileSystem.uploadAsync sends the exact filename in multipart headers
         if (targetFileName && (!cleanUri.endsWith(`/${targetFileName}`) && !cleanUri.endsWith(`\\${targetFileName}`))) {
           const cacheTargetUri = `${FileSystem.cacheDirectory}${targetFileName}`;
-          await FileSystem.copyAsync({ from: cleanUri, to: cacheTargetUri });
+          if (isRemoteUrl) {
+            const cachedDiskPath = await ExpoImage.getCachePathAsync(cleanUri);
+            if (cachedDiskPath) {
+              await FileSystem.copyAsync({ from: cachedDiskPath, to: cacheTargetUri });
+            } else {
+              await FileSystem.downloadAsync(cleanUri, cacheTargetUri);
+            }
+          } else {
+            await FileSystem.copyAsync({ from: cleanUri, to: cacheTargetUri });
+          }
+          fileToUploadUri = cacheTargetUri;
+          tempUploadFile = cacheTargetUri;
+        } else if (isRemoteUrl) {
+          // If remote URL without mismatching target name, ensure we download it locally before uploadAsync
+          const cacheTargetUri = `${FileSystem.cacheDirectory}${targetFileName || `upload_${Date.now()}.jpg`}`;
+          const cachedDiskPath = await ExpoImage.getCachePathAsync(cleanUri);
+          if (cachedDiskPath) {
+            await FileSystem.copyAsync({ from: cachedDiskPath, to: cacheTargetUri });
+          } else {
+            await FileSystem.downloadAsync(cleanUri, cacheTargetUri);
+          }
           fileToUploadUri = cacheTargetUri;
           tempUploadFile = cacheTargetUri;
         }
@@ -813,9 +1044,40 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
   };
 
   const handleSendImageWithCaption = async () => {
-    if (!previewUri) return;
+    const itemsToSend = previewItems.length > 0 ? [...previewItems] : previewUri ? [{ uri: previewUri, fileName: previewFileName }] : [];
+    if (itemsToSend.length === 0) return;
+
+    const caption = previewCaption;
     setPreviewVisible(false);
-    await sendMediaMessage(previewUri, 'image', previewFileName, previewCaption);
+    setPreviewItems([]);
+    setPreviewUri(null);
+    setSelectedDbImageIds([]);
+    setIsMultiSelectDbMode(false);
+
+    if (itemsToSend.length === 1) {
+      await sendMediaMessage(itemsToSend[0].uri, 'image', itemsToSend[0].fileName, caption);
+      return;
+    }
+
+    setLoading(true);
+    let successCount = 0;
+    try {
+      for (let i = 0; i < itemsToSend.length; i++) {
+        const item = itemsToSend[i];
+        // Caption only on the first image (standard behavior like WhatsApp)
+        const itemCaption = i === 0 ? caption : '';
+        await sendMediaMessage(item.uri, 'image', item.fileName, itemCaption);
+        successCount++;
+        if (i < itemsToSend.length - 1) {
+          await new Promise(r => setTimeout(r, 250));
+        }
+      }
+    } catch (err) {
+      console.error('Error sending batch of images:', err);
+      Alert.alert('Aviso', `Se enviaron ${successCount} de ${itemsToSend.length} imágenes.`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Audio Recording Methods using the new expo-audio API and real MP3 encoding
@@ -1441,17 +1703,27 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           <View style={st.previewContainer}>
             {/* Top Bar with discard/close */}
             <View style={st.previewHeader}>
-              <TouchableOpacity onPress={() => setPreviewVisible(false)} style={st.previewCloseBtn}>
+              <TouchableOpacity onPress={() => { setPreviewVisible(false); setPreviewItems([]); setPreviewUri(null); }} style={st.previewCloseBtn}>
                 <X size={24} color="#FFFFFF" />
               </TouchableOpacity>
-              <Text style={st.previewTitleText}>Enviar Imagen</Text>
+              <Text style={st.previewTitleText}>
+                {previewItems.length > 1 ? `Enviar Imágenes (${activePreviewIndex + 1}/${previewItems.length})` : 'Enviar Imagen'}
+              </Text>
               <View style={{ width: 44 }} />
             </View>
 
             {/* Central Box for the Image */}
             <View style={st.previewImageBox}>
               {previewUri && (
-                <Image source={{ uri: previewUri }} style={st.previewFullImage} resizeMode="contain" />
+                <ExpoImage
+                  source={{
+                    uri: previewUri,
+                    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                  }}
+                  style={st.previewFullImage}
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                />
               )}
             </View>
 
@@ -1482,6 +1754,77 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
                     );
                   }}
                   style={{ maxHeight: 150 }}
+                />
+              </View>
+            )}
+
+            {/* Multiple Images Thumbnail Strip */}
+            {previewItems.length > 1 && (
+              <View style={{
+                paddingHorizontal: spacing.md,
+                paddingVertical: spacing.xs,
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(255,255,255,0.1)',
+              }}>
+                <FlatList
+                  horizontal
+                  data={previewItems}
+                  keyExtractor={(it, idx) => `${it.uri}_${idx}`}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 10, alignItems: 'center', paddingVertical: 4 }}
+                  renderItem={({ item, index }) => {
+                    const isActive = index === activePreviewIndex;
+                    return (
+                      <View style={{ position: 'relative' }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setActivePreviewIndex(index);
+                            setPreviewUri(item.uri);
+                            setPreviewFileName(item.fileName);
+                          }}
+                          style={{
+                            width: 54,
+                            height: 54,
+                            borderRadius: borderRadius.sm,
+                            overflow: 'hidden',
+                            borderWidth: 2,
+                            borderColor: isActive ? c.primary : 'transparent',
+                            opacity: isActive ? 1 : 0.65,
+                          }}
+                        >
+                          <ExpoImage
+                            source={{
+                              uri: item.uri,
+                              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                            }}
+                            style={{ width: '100%', height: '100%' }}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                          />
+                        </TouchableOpacity>
+
+                        {/* Remove item from batch */}
+                        <TouchableOpacity
+                          onPress={() => handleRemovePreviewItem(index)}
+                          style={{
+                            position: 'absolute',
+                            top: -5,
+                            right: -5,
+                            backgroundColor: '#EF4444',
+                            width: 18,
+                            height: 18,
+                            borderRadius: 9,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            zIndex: 10,
+                          }}
+                        >
+                          <X size={11} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  }}
                 />
               </View>
             )}
@@ -1668,7 +2011,13 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
                   return (
                     <View style={[st.productCard, { backgroundColor: c.card, borderColor: c.border }]}>
                       {imgUrl ? (
-                        <Image source={{ uri: imgUrl }} style={st.productImage} resizeMode="cover" />
+                        <ExpoImage
+                          source={{ uri: imgUrl }}
+                          style={st.productImage}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                          transition={200}
+                        />
                       ) : (
                         <View style={[st.productImagePlaceholder, { backgroundColor: c.border }]}>
                           <ShoppingBag size={28} color={c.textMuted} />
@@ -1713,10 +2062,28 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
             <View style={[st.catalogHeader, { borderBottomColor: c.border, backgroundColor: c.card }]}>
               <Database size={20} color={c.primary} />
               <Text style={[st.catalogTitle, { color: c.text }]}>Galería Whaticket / BD</Text>
+
+              {/* Multi-select toggle button */}
+              <TouchableOpacity
+                onPress={() => {
+                  const next = !isMultiSelectDbMode;
+                  setIsMultiSelectDbMode(next);
+                  if (!next) setSelectedDbImageIds([]);
+                }}
+                style={[
+                  st.catalogCloseBtn,
+                  { marginRight: spacing.xs },
+                  isMultiSelectDbMode && { backgroundColor: c.primary + '25', borderColor: c.primary, borderWidth: 1 }
+                ]}
+                activeOpacity={0.7}
+              >
+                <CheckSquare size={18} color={isMultiSelectDbMode ? c.primary : c.textMuted} />
+              </TouchableOpacity>
+
               <TouchableOpacity onPress={handleUploadToMediaGallery} style={[st.catalogCloseBtn, { marginRight: spacing.xs }]}>
                 <Upload size={18} color={c.primary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setDbImagesModalOpen(false)} style={st.catalogCloseBtn}>
+              <TouchableOpacity onPress={() => { setDbImagesModalOpen(false); setSelectedDbImageIds([]); setIsMultiSelectDbMode(false); }} style={st.catalogCloseBtn}>
                 <X size={22} color={c.textMuted} />
               </TouchableOpacity>
             </View>
@@ -1747,46 +2114,91 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
                 <Text style={{ color: c.textMuted, marginTop: spacing.md }}>Cargando imágenes guardadas en el servidor...</Text>
               </View>
             ) : dbImages.length > 0 ? (
-              <FlatList
-                data={dbImages.filter(item => {
-                  if (!dbImagesSearch.trim()) return true;
-                  const query = dbImagesSearch.toLowerCase();
-                  return (item.title || '').toLowerCase().includes(query) || (item.source || '').toLowerCase().includes(query);
-                })}
-                keyExtractor={(item) => item.id}
-                numColumns={2}
-                contentContainerStyle={{ padding: spacing.sm }}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={{
-                      flex: 0.5,
-                      margin: spacing.xs,
-                      backgroundColor: c.card,
-                      borderRadius: borderRadius.md,
-                      borderWidth: 1,
-                      borderColor: c.border,
-                      overflow: 'hidden',
-                      alignItems: 'center',
-                    }}
-                    onPress={() => handleSelectDbImage(item)}
-                    activeOpacity={0.8}
-                  >
-                    <Image
-                      source={{ uri: item.url }}
-                      style={{ width: '100%', height: 130 }}
-                      resizeMode="cover"
+              <>
+                <FlatList
+                  data={dbImages.filter(item => {
+                    if (!dbImagesSearch.trim()) return true;
+                    const query = dbImagesSearch.toLowerCase();
+                    return (item.title || '').toLowerCase().includes(query) || (item.source || '').toLowerCase().includes(query);
+                  })}
+                  keyExtractor={(item) => item.id}
+                  numColumns={2}
+                  contentContainerStyle={{ padding: spacing.sm, paddingBottom: selectedDbImageIds.length > 0 ? 80 : spacing.sm }}
+                  renderItem={({ item }) => (
+                    <DbGalleryImageCard
+                      item={item}
+                      c={c}
+                      token={token}
+                      isSelected={selectedDbImageIds.includes(item.id)}
+                      isMultiSelectMode={isMultiSelectDbMode}
+                      onSelect={handleSelectDbImage}
+                      onToggleSelect={handleToggleSelectDbImage}
                     />
-                    <View style={{ padding: 8, width: '100%' }}>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={{ fontSize: 10, color: c.textMuted, marginTop: 2 }}>
-                        {item.source}
+                  )}
+                />
+
+                {/* Floating Bottom Bar for Multi-select */}
+                {selectedDbImageIds.length > 0 && (
+                  <View style={{
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: spacing.sm,
+                    backgroundColor: c.card,
+                    borderTopWidth: 1,
+                    borderTopColor: c.border,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={{
+                        backgroundColor: c.primary,
+                        width: 24,
+                        height: 24,
+                        borderRadius: 12,
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                      }}>
+                        <Text style={{ color: '#090D16', fontWeight: '800', fontSize: 12 }}>
+                          {selectedDbImageIds.length}
+                        </Text>
+                      </View>
+                      <Text style={{ color: c.text, fontWeight: '700', fontSize: 13 }}>
+                        {selectedDbImageIds.length === 1 ? '1 seleccionada' : `${selectedDbImageIds.length} seleccionadas`}
                       </Text>
                     </View>
-                  </TouchableOpacity>
+
+                    <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSelectedDbImageIds([]);
+                          setIsMultiSelectDbMode(false);
+                        }}
+                        style={{ paddingVertical: 8, paddingHorizontal: 10 }}
+                      >
+                        <Text style={{ color: c.textMuted, fontSize: 13, fontWeight: '600' }}>Cancelar</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={handleConfirmMultiSelectDbImages}
+                        style={{
+                          backgroundColor: c.primary,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          paddingVertical: 8,
+                          paddingHorizontal: 14,
+                          borderRadius: borderRadius.md,
+                        }}
+                      >
+                        <Send size={14} color="#090D16" />
+                        <Text style={{ color: '#090D16', fontWeight: '800', fontSize: 13 }}>
+                          Enviar ({selectedDbImageIds.length})
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 )}
-              />
+              </>
             ) : (
               <View style={st.catalogLoaderBox}>
                 <Database size={48} color={c.textMuted} />
