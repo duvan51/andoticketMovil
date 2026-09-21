@@ -7,6 +7,8 @@ import { format, parseISO } from 'date-fns';
 import { User, UserCheck } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { ContactAvatar } from './ContactAvatar';
+import { ContactDetailModal } from './ContactDetailModal';
+import { cleanLastMessagePreview } from '../utils/adReplyParser';
 
 interface Queue {
   id: number;
@@ -56,6 +58,7 @@ export const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, isIntern
   const { theme, user: currentUser } = useAuth();
   const c = colors[theme];
   const [draftText, setDraftText] = useState<string | null>(null);
+  const [contactModalOpen, setContactModalOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -104,13 +107,21 @@ export const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, isIntern
       activeOpacity={0.7}
     >
       {/* Avatar */}
-      <ContactAvatar
-        contact={contact}
-        size={50}
-        backgroundColor={c.primaryLight}
-        textColor={c.primary}
-        style={st.avatar}
-      />
+      <TouchableOpacity
+        onPress={(e) => {
+          e.stopPropagation();
+          setContactModalOpen(true);
+        }}
+        activeOpacity={0.8}
+      >
+        <ContactAvatar
+          contact={contact}
+          size={50}
+          backgroundColor={c.primaryLight}
+          textColor={c.primary}
+          style={st.avatar}
+        />
+      </TouchableOpacity>
 
       {/* Info Column */}
       <View style={st.infoCol}>
@@ -128,7 +139,7 @@ export const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, isIntern
 
         <View style={st.row}>
           <Text style={[st.message, { color: draftText ? '#EF4444' : c.textMuted }, (unreadMessages > 0 || Boolean(draftText)) && st.messageUnread]} numberOfLines={1}>
-            {draftText ? `[Borrador]: ${draftText}` : (lastMessage || 'Sin mensajes')}
+            {draftText ? `[Borrador]: ${draftText}` : cleanLastMessagePreview(lastMessage)}
           </Text>
 
           {unreadMessages > 0 && (
@@ -177,6 +188,15 @@ export const TicketListItem: React.FC<TicketListItemProps> = ({ ticket, isIntern
           )}
         </View>
       </View>
+
+      {contactModalOpen && (
+        <ContactDetailModal
+          visible={contactModalOpen}
+          contact={contact}
+          ticket={ticket}
+          onClose={() => setContactModalOpen(false)}
+        />
+      )}
     </TouchableOpacity>
   );
 };

@@ -9,6 +9,7 @@ import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAuth } from '../context/AuthContext';
 import { AdReplyCard } from './AdReplyCard';
+import { extractAdAndCleanMessage } from '../utils/adReplyParser';
 
 interface Message {
   id: string;
@@ -101,8 +102,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
   const { body, createdAt, fromMe, ack, mediaType, mediaUrl, isDeleted, isPrivate, isNote, adReply } = message;
 
-  const isBodyAudio = Boolean(body && !isMediaPlaceholder(body) && (isAudioFilename(body) || (body.includes('/') && !body.includes(' ') && isAudioFilename(body))));
-  const isBodyImage = Boolean(body && !isMediaPlaceholder(body) && (isImageFile(body) || (isImageFilename(body) && !body.includes(' '))));
+  // Extract AdReply card data (from JSON, adReply, or HTML in body) and get cleaned text
+  const { adData: parsedAdData, cleanText: displayBody } = extractAdAndCleanMessage(body, adReply);
+
+  const isBodyAudio = Boolean(displayBody && !isMediaPlaceholder(displayBody) && (isAudioFilename(displayBody) || (displayBody.includes('/') && !displayBody.includes(' ') && isAudioFilename(displayBody))));
+  const isBodyImage = Boolean(displayBody && !isMediaPlaceholder(displayBody) && (isImageFile(displayBody) || (isImageFilename(displayBody) && !displayBody.includes(' '))));
 
   const rawMediaUrl = mediaUrl || (
     (mediaType === 'audio' || mediaType === 'audio-record' || mediaType === 'ptt' || mediaType === 'voice' || mediaType?.startsWith('audio'))
@@ -615,7 +619,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     ? (theme === 'light' ? 'rgba(15, 23, 42, 0.65)' : 'rgba(255, 255, 255, 0.75)')
     : c.textMuted;
 
-  const hasCaption = body && body.trim() !== '' && !isImageFilename(body) && !isMediaPlaceholder(body) && body !== rawMediaUrl && body !== fullMediaUrl;
+  const hasCaption = Boolean(
+    displayBody &&
+    displayBody.trim() !== '' &&
+    !isImageFilename(displayBody) &&
+    !isMediaPlaceholder(displayBody) &&
+    displayBody !== rawMediaUrl &&
+    displayBody !== fullMediaUrl
+  );
 
   const isMediaError = !fullMediaUrl && (
     isMediaPlaceholder(body) ||
@@ -624,8 +635,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
   return (
     <View style={[st.bubble, fromMe ? st.bubbleSelf : st.bubbleOther]}>
-      {/* Tarjeta de anuncio de Meta Ads (adReply) */}
-      {adReply ? (
+      {/* Tarjeta de anuncio de Meta Ads (adReply / HTML parsed) */}
+      {parsedAdData ? (
+        <AdReplyCard adReplyString={parsedAdData} />
+      ) : adReply ? (
         <AdReplyCard adReplyString={adReply} />
       ) : null}
 
@@ -720,7 +733,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
       {/* Normal Text Body (rendered if not a pure voice/document note or alongside media, and not an error placeholder) */}
       {(!fullMediaUrl || isImage) && hasCaption && !isAudio && !isFile && !isMediaError && (
-        <Text style={[st.bodyText, { color: bubbleTextColor }]}>{body}</Text>
+        <Text style={[st.bodyText, { color: bubbleTextColor }]}>{displayBody}</Text>
       )}
 
       {/* Footer (Time & Status) */}

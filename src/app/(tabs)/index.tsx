@@ -16,7 +16,7 @@ import {
   Search, MessageSquare, Clock, UserPlus, X, Users, Bell,
   SlidersHorizontal, Tag, User2, Layers, Check, ChevronRight, Trash2, CalendarClock, Building2, Mail
 } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { format, parseISO } from 'date-fns';
 import { currentActiveTicketId, isExpoGo, getSafeNotificationsModule } from '../../services/notifications';
 
@@ -213,6 +213,8 @@ export default function ChatsScreen() {
   const [hasMore, setHasMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const searchDebounceRef = useRef<any | null>(null);
+  const flatListRef = useRef<FlatList>(null);
+  const scrollOffsetRef = useRef<number>(0);
 
   // ── Filters ───────────────────────────────────────
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -529,6 +531,20 @@ export default function ChatsScreen() {
     fetchNotifications();
   }, [isAuth, fetchScheduledMessages, fetchNotifications]);
   useEffect(() => { if (usersModalOpen) fetchUsers(); }, [usersModalOpen]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (scrollOffsetRef.current > 0 && flatListRef.current) {
+        const timer = setTimeout(() => {
+          flatListRef.current?.scrollToOffset({
+            offset: scrollOffsetRef.current,
+            animated: false,
+          });
+        }, 60);
+        return () => clearTimeout(timer);
+      }
+    }, [])
+  );
 
   const handleSearch = (text: string) => {
     setSearchQuery(text);
@@ -947,6 +963,7 @@ export default function ChatsScreen() {
               key={tab}
               style={[st.tab, statusTab === tab && st.activeTab]}
               onPress={() => {
+                scrollOffsetRef.current = 0;
                 setStatusTab(tab);
                 if (tab !== 'open') setFilterUnread(false);
               }}
@@ -1041,8 +1058,13 @@ export default function ChatsScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={sortedTickets}
           keyExtractor={item => item.id.toString()}
+          onScroll={(e) => {
+            scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
           renderItem={({ item }) => <TicketListItem ticket={item} allUsers={allUsers} />}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.primary} />}
           onEndReached={loadMore}

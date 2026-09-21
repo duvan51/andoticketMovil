@@ -9,6 +9,7 @@ import api from '../../services/api';
 import { MessageBubble } from '../../components/MessageBubble';
 import { MessageInput } from '../../components/MessageInput';
 import { ContactAvatar } from '../../components/ContactAvatar';
+import { ContactDetailModal } from '../../components/ContactDetailModal';
 import { colors, spacing, borderRadius } from '../../theme/colors';
 import { ArrowLeft, CheckCircle, UserPlus, X, Tag, Info, History, Mail, Phone, Calendar, User, CalendarClock, Trash2, MoreVertical, UserCheck, ArrowRightLeft, Edit2, Layers, Building2, FileText } from 'lucide-react-native';
 import { format, parseISO } from 'date-fns';
@@ -815,249 +816,19 @@ export default function TicketChatScreen() {
       </KeyboardAvoidingView>
 
       {/* Contact Details & History Modal */}
-      <Modal visible={contactModalOpen} transparent animationType="slide">
-        <SafeAreaView style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            {/* Modal Header */}
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Detalle del Cliente</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
-                <TouchableOpacity onPress={handleOpenEditContactModal} style={styles.closeBtn}>
-                  <Edit2 size={20} color={c.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setContactModalOpen(false)} style={styles.closeBtn}>
-                  <X size={24} color={c.text} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
-              {/* Contact Header Card */}
-              <View style={styles.contactCard}>
-                <ContactAvatar
-                  contact={contact}
-                  size={88}
-                  backgroundColor={c.primaryLight}
-                  textColor={c.primary}
-                  style={styles.modalAvatar}
-                />
-                <Text style={styles.contactCardName}>{contact?.name || 'Cliente'}</Text>
-                <View style={styles.contactCardDetailRow}>
-                  <Phone size={14} color={c.textMuted} />
-                  <Text style={styles.contactCardDetailText}>+{contact?.number || ''}</Text>
-                </View>
-                {contact?.email ? (
-                  <View style={styles.contactCardDetailRow}>
-                    <Mail size={14} color={c.textMuted} />
-                    <Text style={styles.contactCardDetailText}>{contact.email}</Text>
-                  </View>
-                ) : null}
-              </View>
-
-              {/* Assignment & Department Card */}
-              <View style={styles.detailsSection}>
-                <View style={styles.sectionTitleIconRow}>
-                  <UserCheck size={16} color={c.primary} />
-                  <Text style={styles.detailsSectionTitle}>Asignación y Departamento</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, flexWrap: 'wrap' }}>
-                  {/* Assigned Advisor */}
-                  <View style={[styles.assignmentBadge, { backgroundColor: c.primaryLight, borderColor: c.primary }]}>
-                    <User size={13} color={c.primary} />
-                    <Text style={[styles.assignmentBadgeText, { color: c.primary }]}>
-                      Asesor: {assignedUserName}
-                    </Text>
-                  </View>
-
-                  {/* Department */}
-                  <View style={[styles.assignmentBadge, { backgroundColor: departmentColor + '18', borderColor: departmentColor }]}>
-                    <Building2 size={13} color={departmentColor} />
-                    <Text style={[styles.assignmentBadgeText, { color: departmentColor }]}>
-                      Depto: {departmentName}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Internal Notes Section */}
-              <View style={styles.detailsSection}>
-                <View style={styles.sectionTitleIconRow}>
-                  <FileText size={16} color="#F59E0B" />
-                  <Text style={styles.detailsSectionTitle}>Notas Internas</Text>
-                </View>
-                <View style={styles.notesContainer}>
-                  {internalNotes.length > 0 ? (
-                    internalNotes.map((note: any) => {
-                      const noteDate = note.createdAt ? format(parseISO(note.createdAt), 'dd/MM/yyyy HH:mm') : '';
-                      return (
-                        <View key={note.id} style={[styles.noteCard, { backgroundColor: theme === 'dark' ? '#2A2415' : '#FFFBEB', borderColor: '#F59E0B' }]}>
-                          <View style={styles.noteHeader}>
-                            <Text style={[styles.noteAuthor, { color: '#D97706' }]}>
-                              {note.user?.name || 'Asesor'}
-                            </Text>
-                            {noteDate ? <Text style={[styles.noteDate, { color: c.textMuted }]}>{noteDate}</Text> : null}
-                          </View>
-                          <Text style={[styles.noteBody, { color: c.text }]}>{note.body || ''}</Text>
-                        </View>
-                      );
-                    })
-                  ) : (
-                    <Text style={styles.noDataText}>Sin notas internas registradas.</Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Tags Section */}
-              <View style={styles.detailsSection}>
-                <View style={styles.sectionTitleRow}>
-                  <View style={styles.sectionTitleIconRow}>
-                    <Tag size={16} color={c.primary} />
-                    <Text style={styles.detailsSectionTitle}>Etiquetas</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setTagModalOpen(true)}>
-                    <Text style={styles.manageTagsLink}>Gestionar</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Display tags */}
-                <View style={styles.tagsContainer}>
-                  {ticket?.tags && ticket.tags.length > 0 ? (
-                    ticket.tags.map((tag: any) => (
-                      <View key={tag.id} style={[styles.tagChip, { backgroundColor: tag.color || c.primary }]}>
-                        <Text style={styles.tagChipText}>{tag.name}</Text>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={styles.noDataText}>Sin etiquetas en este ticket.</Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Scheduled Messages Section */}
-              <View style={styles.detailsSection}>
-                <View style={styles.sectionTitleRow}>
-                  <View style={styles.sectionTitleIconRow}>
-                    <CalendarClock size={16} color={c.primary} />
-                    <Text style={styles.detailsSectionTitle}>Mensajes Programados</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setSchedModalOpen(true)}>
-                    <Text style={styles.manageTagsLink}>Programar Nuevo</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.scheduledMessagesContainer}>
-                  {scheduledMessages.length > 0 ? (
-                    scheduledMessages.map((msg: any) => {
-                      const sendDate = format(parseISO(msg.sendAt), 'dd/MM/yyyy HH:mm');
-                      return (
-                        <View key={msg.id} style={styles.scheduledMessageCard}>
-                          <View style={styles.scheduledMessageInfo}>
-                            <Text style={styles.scheduledMessageText}>{msg.body}</Text>
-                            <Text style={styles.scheduledMessageTime}>Envío: {sendDate}</Text>
-                          </View>
-                          <TouchableOpacity onPress={() => handleDeleteSchedule(msg.id)} style={styles.deleteScheduleBtn}>
-                            <Trash2 size={16} color="#EF4444" />
-                          </TouchableOpacity>
-                        </View>
-                      );
-                    })
-                  ) : (
-                    <Text style={styles.noDataText}>No hay mensajes programados.</Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Custom Fields Section */}
-              <View style={styles.detailsSection}>
-                <View style={styles.sectionTitleIconRow}>
-                  <Info size={16} color={c.primary} />
-                  <Text style={styles.detailsSectionTitle}>Campos Extra</Text>
-                </View>
-                <View style={styles.extraInfoContainer}>
-                  {contact?.extraInfo && contact.extraInfo.length > 0 ? (
-                    contact.extraInfo.map((info: any) => (
-                      <View key={info.id} style={styles.extraInfoCard}>
-                        <Text style={styles.extraInfoLabel}>{info.name}</Text>
-                        <Text style={styles.extraInfoValue}>{info.value}</Text>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={styles.noDataText}>Sin información adicional.</Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Timeline / Process History Section */}
-              <View style={styles.detailsSection}>
-                <View style={styles.sectionTitleIconRow}>
-                  <History size={16} color={c.primary} />
-                  <Text style={styles.detailsSectionTitle}>Historial de Proceso</Text>
-                </View>
-
-                <View style={styles.timelineContainer}>
-                  {timelineItems.length === 0 ? (
-                    <Text style={styles.noDataText}>No hay historial registrado.</Text>
-                  ) : (
-                    timelineItems.map((item: any, idx: number) => {
-                      const isLast = idx === timelineItems.length - 1;
-                      const dateFormatted = format(parseISO(item.createdAt), 'dd/MM/yyyy HH:mm');
-
-                      let contentText = '';
-                      let dotBgColor = '#94A3B8'; // gray default
-
-                      if (item.type === 'note') {
-                        contentText = `Nota: "${item.body}"`;
-                        dotBgColor = '#F59E0B'; // yellow note
-                      } else if (item.type === 'tag') {
-                        contentText = item.body;
-                        dotBgColor = '#A855F7'; // purple tag
-                      } else if (item.type === 'schedule_history') {
-                        contentText = item.body;
-                        dotBgColor = '#64748B'; // schedule grey
-                      } else {
-                        // tracking
-                        if (idx === timelineItems.length - 1) {
-                          contentText = 'Inicio conversación';
-                          dotBgColor = '#EC4899'; // pink start
-                        } else if (!item.userId) {
-                          contentText = 'Devuelto a pendientes';
-                          dotBgColor = '#F97316'; // orange
-                        } else {
-                          contentText = `Asignado a: ${item.user?.name || 'Desconocido'}`;
-                          dotBgColor = '#3B82F6'; // blue
-                        }
-
-                        if (item.finishedAt) {
-                          const durationText = formatDuration(item.createdAt, item.finishedAt);
-                          contentText += ` (${durationText})`;
-                        } else {
-                          contentText += ' (Activo)';
-                          dotBgColor = '#10B981'; // green active
-                        }
-                      }
-
-                      return (
-                        <View key={item.id} style={styles.timelineItem}>
-                          {/* Left Column (dot & line) */}
-                          <View style={styles.timelineLeft}>
-                            <View style={[styles.timelineDot, { backgroundColor: dotBgColor }]} />
-                            {!isLast && <View style={styles.timelineConnector} />}
-                          </View>
-                          {/* Right Column (content) */}
-                          <View style={styles.timelineRight}>
-                            <Text style={styles.timelineContentText}>{contentText}</Text>
-                            <Text style={styles.timelineDateText}>{dateFormatted}</Text>
-                          </View>
-                        </View>
-                      );
-                    })
-                  )}
-                </View>
-              </View>
-            </ScrollView>
-          </View>
-        </SafeAreaView>
-      </Modal>
+      <ContactDetailModal
+        visible={contactModalOpen}
+        contact={contact}
+        ticket={ticket}
+        messages={allMessagesList}
+        onClose={() => setContactModalOpen(false)}
+        onEditContact={handleOpenEditContactModal}
+        onManageTags={() => setTagModalOpen(true)}
+        onScheduleMessage={() => setSchedModalOpen(true)}
+        onDeleteSchedule={handleDeleteSchedule}
+        scheduledMessages={scheduledMessages}
+        timelineItems={timelineItems}
+      />
 
       {/* Manage Tags Sub-Modal */}
       <Modal visible={tagModalOpen} transparent animationType="fade">

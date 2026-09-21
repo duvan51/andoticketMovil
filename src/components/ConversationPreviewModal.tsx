@@ -15,6 +15,8 @@ import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { colors, spacing, borderRadius } from '../theme/colors';
 import { MessageBubble } from './MessageBubble';
+import { ContactAvatar } from './ContactAvatar';
+import { ContactDetailModal } from './ContactDetailModal';
 import {
   X,
   MessageCircle,
@@ -47,6 +49,7 @@ export function ConversationPreviewModal({
 
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [contactModalOpen, setContactModalOpen] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
@@ -384,12 +387,17 @@ export function ConversationPreviewModal({
           {/* Header */}
           <View style={st.header}>
             <View style={st.headerTopRow}>
-              <View style={st.contactInfoRow}>
-                <View style={st.avatarPlaceholder}>
-                  <Text style={st.avatarText}>
-                    {(contact?.name || 'C').charAt(0).toUpperCase()}
-                  </Text>
-                </View>
+              <TouchableOpacity
+                style={st.contactInfoRow}
+                onPress={() => setContactModalOpen(true)}
+                activeOpacity={0.7}
+              >
+                <ContactAvatar
+                  contact={contact}
+                  size={44}
+                  backgroundColor={c.primaryLight}
+                  textColor={c.primary}
+                />
                 <View style={st.contactDetails}>
                   <Text style={st.contactName} numberOfLines={1}>
                     {contact?.name || 'Sin nombre'}
@@ -401,7 +409,7 @@ export function ConversationPreviewModal({
                     </Text>
                   </View>
                 </View>
-              </View>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={st.closeButton}
@@ -515,6 +523,16 @@ export function ConversationPreviewModal({
           </View>
         </SafeAreaView>
       </View>
+
+      {contactModalOpen && (
+        <ContactDetailModal
+          visible={contactModalOpen}
+          contact={contact}
+          ticket={ticket}
+          messages={messages}
+          onClose={() => setContactModalOpen(false)}
+        />
+      )}
     </Modal>
   );
 }

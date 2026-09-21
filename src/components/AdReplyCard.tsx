@@ -1,15 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, Image, TouchableOpacity, Linking, StyleSheet } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { AdReplyData, parseAdReplyData } from '../utils/adReplyParser';
 
-export interface AdReplyData {
-  title?: string;
-  body?: string;
-  sourceUrl?: string;
-  sourceId?: string;
-  sourceType?: string;
-  thumbnailUrl?: string;
-}
+export type { AdReplyData };
 
 export interface AdReplyCardProps {
   adReplyString?: string | AdReplyData | null;
@@ -35,7 +29,7 @@ export const AdReplyCard: React.FC<AdReplyCardProps> = ({ adReplyString, apiUrl:
 
   let adData: AdReplyData | null = null;
   try {
-    adData = typeof adReplyString === 'string' ? JSON.parse(adReplyString) : (adReplyString as AdReplyData);
+    adData = parseAdReplyData(adReplyString);
   } catch (err) {
     return null;
   }
