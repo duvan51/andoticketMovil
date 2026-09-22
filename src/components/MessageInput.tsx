@@ -1096,7 +1096,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     }
   };
 
-  // Audio Recording Methods using the new expo-audio API and real MP3 encoding
+  // Audio Recording Methods using WHATSAPP_VOICE_PRESET (.m4a AAC) for WhatsApp voice note compatibility
   const startRecording = async () => {
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
@@ -1119,19 +1119,14 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         allowsRecording: true,
       });
 
-      if (Platform.OS !== 'web' && audioStream) {
-        mp3RecorderRef.current.init(44100);
-        await audioStream.start();
-        setIsRecording(true);
-        if (streamTimerRef.current) clearInterval(streamTimerRef.current);
-        streamTimerRef.current = setInterval(() => {
-          setStreamDuration((prev) => prev + 1);
-        }, 1000);
-      } else {
-        await recorder.prepareToRecordAsync(WHATSAPP_VOICE_PRESET);
-        setIsRecording(true);
-        recorder.record();
-      }
+      await recorder.prepareToRecordAsync(WHATSAPP_VOICE_PRESET);
+      setIsRecording(true);
+      recorder.record();
+
+      if (streamTimerRef.current) clearInterval(streamTimerRef.current);
+      streamTimerRef.current = setInterval(() => {
+        setStreamDuration((prev) => prev + 1);
+      }, 1000);
     } catch (err) {
       console.error('Failed to start recording', err);
       Alert.alert('Error', 'No se pudo iniciar la grabación de audio.');
@@ -1156,23 +1151,11 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         allowsRecording: false,
       });
 
-      let finalUri: string | null = null;
-      if (Platform.OS !== 'web' && audioStream) {
-        try {
-          audioStream.stop();
-          finalUri = await mp3RecorderRef.current.finalizeToFile();
-        } catch (streamErr) {
-          console.error('Error stopping audioStream, falling back to recorder:', streamErr);
-        }
-      }
-
-      if (!finalUri && recorder) {
-        await recorder.stop();
-        finalUri = recorder.uri;
-      }
+      await recorder.stop();
+      const finalUri = recorder.uri;
 
       if (finalUri) {
-        const fileName = `${Date.now()}.mp3`;
+        const fileName = `${Date.now()}.m4a`;
         setRecordedUri(finalUri);
         setRecordedFileName(fileName);
         setShowAudioPreview(true);
@@ -1223,12 +1206,12 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         }
       }
 
-      const fileName = recordedFileName || `${Date.now()}.mp3`;
+      const fileName = recordedFileName || `${Date.now()}.m4a`;
       const uriToSend = recordedUri;
       clearAudioPreview();
-      setText(''); // Clear the text input after sending
+      setText(''); // Clear text input after sending
 
-      await sendMediaMessage(uriToSend, 'audio', fileName, '', 'audio/mp3');
+      await sendMediaMessage(uriToSend, 'audio', fileName, '', 'audio/mp4');
     } catch (err) {
       console.error('Error sending recorded audio:', err);
       Alert.alert('Error', 'No se pudo enviar el mensaje de audio.');
