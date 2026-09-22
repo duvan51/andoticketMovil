@@ -932,15 +932,28 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         textCaption = textCaption ? `${sigPrefix}${textCaption}` : sigPrefix.trim();
       }
 
-      let targetFileName = fileName;
+      let targetFileName = fileName || `file_${Date.now()}`;
       let fileType = 'application/octet-stream';
 
       if (type === 'audio') {
-        const isMp3 = fileName && fileName.toLowerCase().endsWith('.mp3');
-        targetFileName = isMp3 ? fileName : `${Date.now()}.mp3`;
-        fileType = mimeType || 'audio/mp3';
+        const lowerName = targetFileName.toLowerCase();
+        const isMp3 = lowerName.endsWith('.mp3');
+        const isM4a = lowerName.endsWith('.m4a');
+        if (isMp3) {
+          fileType = mimeType || 'audio/mpeg';
+        } else if (isM4a) {
+          fileType = mimeType || 'audio/mp4';
+        } else {
+          targetFileName = `${Date.now()}.mp3`;
+          fileType = mimeType || 'audio/mpeg';
+        }
       } else if (type === 'image') {
-        fileType = mimeType || 'image/jpeg';
+        const lowerName = targetFileName.toLowerCase();
+        const hasImgExt = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png') || lowerName.endsWith('.webp') || lowerName.endsWith('.gif');
+        fileType = mimeType || (lowerName.endsWith('.png') ? 'image/png' : 'image/jpeg');
+        if (!hasImgExt) {
+          targetFileName = `photo_${Date.now()}.${fileType === 'image/png' ? 'png' : 'jpg'}`;
+        }
       } else {
         fileType = mimeType || 'application/octet-stream';
       }
@@ -972,9 +985,10 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         let fileToUploadUri = cleanUri;
         const isRemoteUrl = cleanUri.startsWith('http://') || cleanUri.startsWith('https://');
 
-        // For audio (or any media), ensure file on disk matches targetFileName so FileSystem.uploadAsync sends the exact filename in multipart headers
+        // Ensure file on disk matches targetFileName so FileSystem.uploadAsync sends exact filename in multipart headers
         if (targetFileName && (!cleanUri.endsWith(`/${targetFileName}`) && !cleanUri.endsWith(`\\${targetFileName}`))) {
           const cacheTargetUri = `${FileSystem.cacheDirectory}${targetFileName}`;
+          await FileSystem.deleteAsync(cacheTargetUri, { idempotent: true }).catch(() => {});
           if (isRemoteUrl) {
             const cachedDiskPath = await ExpoImage.getCachePathAsync(cleanUri);
             if (cachedDiskPath) {
@@ -990,6 +1004,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         } else if (isRemoteUrl) {
           // If remote URL without mismatching target name, ensure we download it locally before uploadAsync
           const cacheTargetUri = `${FileSystem.cacheDirectory}${targetFileName || `upload_${Date.now()}.jpg`}`;
+          await FileSystem.deleteAsync(cacheTargetUri, { idempotent: true }).catch(() => {});
           const cachedDiskPath = await ExpoImage.getCachePathAsync(cleanUri);
           if (cachedDiskPath) {
             await FileSystem.copyAsync({ from: cachedDiskPath, to: cacheTargetUri });
@@ -1018,6 +1033,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         });
 
         if (uploadResult.status < 200 || uploadResult.status >= 300) {
+          console.error('[sendMediaMessage] Upload failed status:', uploadResult.status, uploadResult.body);
           throw new Error(`Upload failed with status ${uploadResult.status}`);
         }
       } else {
