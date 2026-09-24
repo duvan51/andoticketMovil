@@ -420,7 +420,7 @@ export default function QuickAnswersScreen() {
   // Discover working endpoint (/quick-answers or /quickanswers) on mount
   const fetchAndDiscoverAnswers = useCallback(async () => {
     setLoading(true);
-    const endpointsToTry = ['/quick-answers', '/quickanswers'];
+    const endpointsToTry = ['/quickanswers', '/quick-answers'];
     
     for (const endpoint of endpointsToTry) {
       try {

@@ -35,29 +35,60 @@ interface MessageInputProps {
 }
 
 interface Product {
-  id: string | number;
+  id?: string | number;
   name?: string;
   title?: string;
+  nombre?: string;
+  titulo?: string;
   code?: string;
+  codigo?: string;
   description?: string;
   details?: string;
+  descripcion?: string;
+  detalle?: string;
   price?: string | number;
   value?: string | number;
+  precio?: string | number;
+  valor?: string | number;
   image?: string;
   imageUrl?: string;
+  image_url?: string;
+  imagen?: string;
+  foto?: string;
   main_image?: string;
   thumbnail?: string;
   url?: string;
   link?: string;
+  enlace?: string;
   video_url?: string;
   built_area?: string | number;
+  [key: string]: any;
 }
 
+const resolveCatalogImageUrl = (rawImg?: string, baseUrl?: string): string => {
+  if (!rawImg || typeof rawImg !== 'string') return '';
+  const trimmed = rawImg.trim();
+  if (
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('file://') ||
+    trimmed.startsWith('content://') ||
+    trimmed.startsWith('data:')
+  ) {
+    return trimmed;
+  }
+  if (baseUrl && (baseUrl.startsWith('http://') || baseUrl.startsWith('https://'))) {
+    const origin = baseUrl.replace(/^(https?:\/\/[^\/]+).*$/, '$1');
+    return trimmed.startsWith('/') ? `${origin}${trimmed}` : `${origin}/${trimmed}`;
+  }
+  return trimmed;
+};
+
 const getAudioFileInfoFromUri = (uri: string, mimeTypeOverride?: string) => {
-  if (!uri) return { ext: 'm4a', mime: 'audio/mp4' };
+  if (!uri) return { ext: 'mp3', mime: 'audio/mpeg' };
   const uriLower = uri.toLowerCase().split('?')[0];
-  let ext = 'm4a';
-  let mime = 'audio/mp4';
+  let ext = 'mp3';
+  let mime = 'audio/mpeg';
 
   if (uriLower.endsWith('.aac')) {
     ext = 'aac';
@@ -324,6 +355,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
   const [showAudioPreview, setShowAudioPreview] = useState(false);
 
   // Real MP3 streaming recorder
+  const isStreamRecordingRef = useRef<boolean>(false);
   const mp3RecorderRef = useRef<RealMp3Recorder>(new RealMp3Recorder(44100));
   const [streamDuration, setStreamDuration] = useState(0);
   const streamTimerRef = useRef<any>(null);
@@ -333,7 +365,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     channels: 1,
     encoding: 'int16',
     onBuffer: (buffer) => {
-      if (buffer?.data) {
+      if (isStreamRecordingRef.current && buffer?.data) {
         mp3RecorderRef.current.processBuffer(buffer.data, buffer.sampleRate);
       }
     },
@@ -443,7 +475,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     loadCatalogUrl();
 
     const loadQuickAnswers = async () => {
-      const endpointsToTry = ['/quick-answers', '/quickanswers'];
+      const endpointsToTry = ['/quickanswers', '/quick-answers'];
       for (const endpoint of endpointsToTry) {
         try {
           const response = await api.get(endpoint);
@@ -451,8 +483,11 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           const answersList = Array.isArray(data) ? data : (data?.quickAnswers || data?.data || []);
           setQuickAnswers(answersList);
           return;
-        } catch (err) {
-          console.log(`Failed to fetch quick answers on mount from ${endpoint}:`, err);
+        } catch (err: any) {
+          // If it's a 404, silently fallback to the next candidate
+          if (err?.response?.status !== 404) {
+            console.log(`Failed to fetch quick answers on mount from ${endpoint}:`, err);
+          }
         }
       }
     };
@@ -487,7 +522,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     };
   }, []);
 
-  // Fetch products from andoPages API URL
+  // Fetch products from andoPages API URL or custom products endpoint
   const fetchCatalogProducts = async (targetUrl?: string) => {
     const activeUrl = targetUrl || catalogUrl;
     if (!activeUrl) {
@@ -495,7 +530,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       return;
     }
     try {
-      // Add a cache buster parameter to prevent browser cache from serving the old HTML redirect
+      // Add a cache buster parameter to prevent browser cache from serving old response
       const cacheBusterUrl = activeUrl.includes('?') 
         ? `${activeUrl}&_cb=${Date.now()}` 
         : `${activeUrl}?_cb=${Date.now()}`;
@@ -504,11 +539,25 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       setLoadingCatalog(true);
       
       const response = await axios.get(cacheBusterUrl);
-      if (response.data && Array.isArray(response.data.products)) {
-        setProducts(response.data.products);
-      } else {
-        setProducts([]);
+      const d = response.data;
+      let rawList: any[] = [];
+
+      if (Array.isArray(d)) {
+        rawList = d;
+      } else if (d && typeof d === 'object') {
+        if (Array.isArray(d.products)) rawList = d.products;
+        else if (Array.isArray(d.productos)) rawList = d.productos;
+        else if (Array.isArray(d.data)) rawList = d.data;
+        else if (d.data && Array.isArray(d.data.products)) rawList = d.data.products;
+        else if (d.data && Array.isArray(d.data.productos)) rawList = d.data.productos;
+        else if (Array.isArray(d.items)) rawList = d.items;
+        else if (Array.isArray(d.articulos)) rawList = d.articulos;
+        else if (Array.isArray(d.records)) rawList = d.records;
+        else if (Array.isArray(d.catalog)) rawList = d.catalog;
+        else if (Array.isArray(d.results)) rawList = d.results;
       }
+
+      setProducts(rawList);
     } catch (err) {
       console.error(' [andoPages] Error fetching products:', err);
       setProducts([]);
@@ -667,13 +716,22 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           /\.(mp3|m4a|wav|aac|ogg|opus|flac|3gp)$/i.test(selectedAsset.name || '');
 
         const audioMime = isAudio
-          ? (rawMime && rawMime.startsWith('audio/') && rawMime !== 'audio/m4a' && rawMime !== 'audio/mp3' ? rawMime : (selectedAsset.name?.endsWith('.mp3') ? 'audio/mpeg' : 'audio/mp4'))
+          ? (rawMime && rawMime.startsWith('audio/') && rawMime !== 'audio/m4a' && rawMime !== 'audio/mp4' ? rawMime : 'audio/mpeg')
           : rawMime;
+
+        let targetName = selectedAsset.name;
+        if (isAudio) {
+          if (!targetName) {
+            targetName = `audio_${Date.now()}.mp3`;
+          } else if (!targetName.toLowerCase().endsWith('.mp3')) {
+            targetName = `${targetName.replace(/\.[^/.]+$/, '')}.mp3`;
+          }
+        }
 
         await sendMediaMessage(
           selectedAsset.uri,
           isAudio ? 'audio' : 'file',
-          selectedAsset.name || (isAudio ? `audio_${Date.now()}.m4a` : 'file'),
+          targetName || (isAudio ? `audio_${Date.now()}.mp3` : 'file'),
           text.trim() || '', // Send with the current text as caption
           audioMime
         );
@@ -732,7 +790,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       }
 
       // 2. Secondary: Fetch images from Quick Answers
-      const endpointsToTry = ['/quick-answers', '/quickanswers'];
+      const endpointsToTry = ['/quickanswers', '/quick-answers'];
       for (const endpoint of endpointsToTry) {
         try {
           const res = await api.get(endpoint);
@@ -759,8 +817,10 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
             }
           });
           break;
-        } catch (e) {
-          console.log('Error fetching DB images from quick answers:', e);
+        } catch (e: any) {
+          if (e?.response?.status !== 404) {
+            console.log('Error fetching DB images from quick answers:', e);
+          }
         }
       }
 
@@ -936,17 +996,12 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       let fileType = 'application/octet-stream';
 
       if (type === 'audio') {
-        const lowerName = targetFileName.toLowerCase();
-        const isMp3 = lowerName.endsWith('.mp3');
-        const isM4a = lowerName.endsWith('.m4a');
-        if (isMp3) {
-          fileType = mimeType || 'audio/mpeg';
-        } else if (isM4a) {
-          fileType = mimeType || 'audio/mp4';
-        } else {
-          targetFileName = `${Date.now()}.mp3`;
-          fileType = mimeType || 'audio/mpeg';
+        let cleanName = targetFileName;
+        if (!cleanName.toLowerCase().endsWith('.mp3')) {
+          cleanName = `${cleanName.replace(/\.[^/.]+$/, '')}.mp3`;
         }
+        targetFileName = cleanName;
+        fileType = 'audio/mpeg';
       } else if (type === 'image') {
         const lowerName = targetFileName.toLowerCase();
         const hasImgExt = lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png') || lowerName.endsWith('.webp') || lowerName.endsWith('.gif');
@@ -977,46 +1032,56 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         }
       }
 
+      let fileToUploadUri = cleanUri;
+      const isRemoteUrl = cleanUri.startsWith('http://') || cleanUri.startsWith('https://');
+
       if (Platform.OS !== 'web') {
-        const token = await AsyncStorage.getItem('@whaticket:token');
-        const savedApiUrl = (await AsyncStorage.getItem('@whaticket:api_url')) || 'https://api.andoticket.cloud';
+        let token = await AsyncStorage.getItem('@whaticket:token');
+        const savedApiUrl = (await AsyncStorage.getItem('@whaticket:api_url')) || apiUrl || 'https://api.andoticket.cloud';
         const cleanApiUrl = savedApiUrl.replace(/\/+$/, '');
 
-        let fileToUploadUri = cleanUri;
-        const isRemoteUrl = cleanUri.startsWith('http://') || cleanUri.startsWith('https://');
+        const safeFileName = (targetFileName || (type === 'audio' ? `audio_${Date.now()}.mp3` : `media_${Date.now()}.jpg`))
+          .replace(/[^a-zA-Z0-9._-]/g, '_');
 
-        // Ensure file on disk matches targetFileName so FileSystem.uploadAsync sends exact filename in multipart headers
-        if (targetFileName && (!cleanUri.endsWith(`/${targetFileName}`) && !cleanUri.endsWith(`\\${targetFileName}`))) {
-          const cacheTargetUri = `${FileSystem.cacheDirectory}${targetFileName}`;
+        if (isRemoteUrl) {
+          // For remote URLs (e.g. catalog product images), download directly to local cache
+          const cacheTargetUri = `${FileSystem.cacheDirectory}${safeFileName}`;
           await FileSystem.deleteAsync(cacheTargetUri, { idempotent: true }).catch(() => {});
-          if (isRemoteUrl) {
-            const cachedDiskPath = await ExpoImage.getCachePathAsync(cleanUri);
-            if (cachedDiskPath) {
-              await FileSystem.copyAsync({ from: cachedDiskPath, to: cacheTargetUri });
-            } else {
-              await FileSystem.downloadAsync(cleanUri, cacheTargetUri);
-            }
+          console.log('[sendMediaMessage] Downloading remote media directly to cache:', cleanUri, '->', cacheTargetUri);
+          const downloadRes = await FileSystem.downloadAsync(cleanUri, cacheTargetUri);
+          if (downloadRes.status >= 200 && downloadRes.status < 300) {
+            fileToUploadUri = downloadRes.uri;
+            tempUploadFile = downloadRes.uri;
           } else {
-            await FileSystem.copyAsync({ from: cleanUri, to: cacheTargetUri });
+            console.error('[sendMediaMessage] Download failed with status:', downloadRes.status);
+            throw new Error(`No se pudo descargar la imagen del producto (HTTP ${downloadRes.status}).`);
           }
-          fileToUploadUri = cacheTargetUri;
-          tempUploadFile = cacheTargetUri;
-        } else if (isRemoteUrl) {
-          // If remote URL without mismatching target name, ensure we download it locally before uploadAsync
-          const cacheTargetUri = `${FileSystem.cacheDirectory}${targetFileName || `upload_${Date.now()}.jpg`}`;
+        } else if (targetFileName && (!fileToUploadUri.endsWith(`/${targetFileName}`) && !fileToUploadUri.endsWith(`\\${targetFileName}`))) {
+          // For local files, ensure proper name on disk so multipart headers have clean filename
+          const cacheTargetUri = `${FileSystem.cacheDirectory}${safeFileName}`;
           await FileSystem.deleteAsync(cacheTargetUri, { idempotent: true }).catch(() => {});
-          const cachedDiskPath = await ExpoImage.getCachePathAsync(cleanUri);
-          if (cachedDiskPath) {
-            await FileSystem.copyAsync({ from: cachedDiskPath, to: cacheTargetUri });
-          } else {
-            await FileSystem.downloadAsync(cleanUri, cacheTargetUri);
+          let sourceUri = fileToUploadUri;
+          if (Platform.OS === 'android' && !sourceUri.startsWith('file://') && !sourceUri.startsWith('content://')) {
+            sourceUri = `file://${sourceUri}`;
           }
-          fileToUploadUri = cacheTargetUri;
-          tempUploadFile = cacheTargetUri;
+          try {
+            await FileSystem.copyAsync({ from: sourceUri, to: cacheTargetUri });
+            fileToUploadUri = cacheTargetUri;
+            tempUploadFile = cacheTargetUri;
+          } catch (copyErr) {
+            console.warn('[sendMediaMessage] copyAsync failed, uploading original URI directly:', copyErr);
+            fileToUploadUri = sourceUri;
+          }
         }
 
-        // Use FileSystem.uploadAsync for reliable native file uploads instead of RN's buggy FormData
-        const uploadResult = await FileSystem.uploadAsync(`${cleanApiUrl}/messages/${ticketId}`, fileToUploadUri, {
+        console.log('[sendMediaMessage] Uploading via FileSystem.uploadAsync:', {
+          url: `${cleanApiUrl}/messages/${ticketId}`,
+          fileToUploadUri,
+          targetFileName,
+          fileType,
+        });
+
+        let uploadResult = await FileSystem.uploadAsync(`${cleanApiUrl}/messages/${ticketId}`, fileToUploadUri, {
           fieldName: 'medias',
           httpMethod: 'POST',
           uploadType: FileSystem.FileSystemUploadType.MULTIPART,
@@ -1024,7 +1089,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           parameters: {
             fromMe: 'true',
             body: textCaption || targetFileName,
-            ...(isNote ? { isNote: 'true' } : {})
+            ...(isNote ? { isNote: 'true' } : {}),
           },
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1032,16 +1097,68 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
           },
         });
 
+        // If 401 Unauthorized, attempt refresh token and retry upload once
+        if (uploadResult.status === 401) {
+          console.warn('[sendMediaMessage] 401 Unauthorized, attempting token refresh...');
+          try {
+            const refreshRes = await axios.post(
+              `${cleanApiUrl}/auth/refresh_token`,
+              {},
+              {
+                headers: { Authorization: `Bearer ${token}` },
+                withCredentials: true,
+              }
+            );
+            const newToken = refreshRes.data?.token;
+            if (newToken) {
+              await AsyncStorage.setItem('@whaticket:token', newToken);
+              token = newToken;
+              uploadResult = await FileSystem.uploadAsync(`${cleanApiUrl}/messages/${ticketId}`, fileToUploadUri, {
+                fieldName: 'medias',
+                httpMethod: 'POST',
+                uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+                mimeType: fileType,
+                parameters: {
+                  fromMe: 'true',
+                  body: textCaption || targetFileName,
+                  ...(isNote ? { isNote: 'true' } : {}),
+                },
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  Accept: 'application/json',
+                },
+              });
+            }
+          } catch (refreshErr) {
+            console.error('[sendMediaMessage] Token refresh failed:', refreshErr);
+          }
+        }
+
+        console.log('[sendMediaMessage] uploadAsync result status:', uploadResult.status, uploadResult.body);
+
         if (uploadResult.status < 200 || uploadResult.status >= 300) {
           console.error('[sendMediaMessage] Upload failed status:', uploadResult.status, uploadResult.body);
-          throw new Error(`Upload failed with status ${uploadResult.status}`);
+          let errorMsg = `Upload failed with status ${uploadResult.status}`;
+          try {
+            const parsed = JSON.parse(uploadResult.body);
+            if (parsed?.message) errorMsg = parsed.message;
+            else if (parsed?.error) errorMsg = parsed.error;
+          } catch (_) {}
+          throw new Error(errorMsg);
         }
       } else {
+        // Web Platform
         const response = await fetch(uri);
         const blob = await response.blob();
         const fileData = new File([blob], targetFileName, { type: fileType });
-        formData.append('medias', fileData);
-        await api.post(`/messages/${ticketId}`, formData);
+        const webFormData = new FormData();
+        webFormData.append('fromMe', 'true');
+        webFormData.append('body', textCaption || targetFileName);
+        if (isNote) webFormData.append('isNote', 'true');
+        webFormData.append('medias', fileData);
+
+        const responseApi = await api.post(`/messages/${ticketId}`, webFormData);
+        console.log('[sendMediaMessage] web api.post response:', responseApi.status, responseApi.data);
       }
 
       if (ticketId) {
@@ -1049,8 +1166,9 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       }
       setIsNote(false); // Success, clear note mode
     } catch (error: any) {
-      console.error('Error sending media:', error?.message || error);
-      Alert.alert('Error', 'No se pudo enviar el archivo adjunto.');
+      console.error('[sendMediaMessage] CATCH ERROR:', error?.response?.data || error?.message || error);
+      const msg = error?.response?.data?.message || error?.message || 'No se pudo enviar el archivo adjunto.';
+      Alert.alert('Error', msg);
     } finally {
       if (tempUploadFile) {
         FileSystem.deleteAsync(tempUploadFile, { idempotent: true }).catch(() => {});
@@ -1096,7 +1214,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     }
   };
 
-  // Audio Recording Methods using WHATSAPP_VOICE_PRESET (.m4a AAC) for WhatsApp voice note compatibility
+  // Audio Recording Methods using RealMp3Recorder (LAME MP3) and expo-audio
   const startRecording = async () => {
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
@@ -1119,9 +1237,26 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         allowsRecording: true,
       });
 
-      await recorder.prepareToRecordAsync(WHATSAPP_VOICE_PRESET);
-      setIsRecording(true);
-      recorder.record();
+      let usedStream = false;
+      if (Platform.OS !== 'web' && audioStream) {
+        try {
+          mp3RecorderRef.current.init(44100);
+          isStreamRecordingRef.current = true;
+          await audioStream.start();
+          usedStream = true;
+          setIsRecording(true);
+        } catch (streamErr) {
+          console.warn('AudioStream start failed, falling back to standard recorder:', streamErr);
+          isStreamRecordingRef.current = false;
+        }
+      }
+
+      if (!usedStream) {
+        await recorder.prepareToRecordAsync(WHATSAPP_VOICE_PRESET);
+        recorder.record();
+        isStreamRecordingRef.current = false;
+        setIsRecording(true);
+      }
 
       if (streamTimerRef.current) clearInterval(streamTimerRef.current);
       streamTimerRef.current = setInterval(() => {
@@ -1131,6 +1266,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       console.error('Failed to start recording', err);
       Alert.alert('Error', 'No se pudo iniciar la grabación de audio.');
       setIsRecording(false);
+      isStreamRecordingRef.current = false;
       if (streamTimerRef.current) {
         clearInterval(streamTimerRef.current);
         streamTimerRef.current = null;
@@ -1151,11 +1287,27 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         allowsRecording: false,
       });
 
-      await recorder.stop();
-      const finalUri = recorder.uri;
+      let finalUri: string | null = null;
+      if (isStreamRecordingRef.current && audioStream) {
+        try {
+          audioStream.stop();
+          finalUri = await mp3RecorderRef.current.finalizeToFile();
+        } catch (streamErr) {
+          console.error('Error stopping audioStream:', streamErr);
+        } finally {
+          isStreamRecordingRef.current = false;
+        }
+      } else if (recorder) {
+        try {
+          await recorder.stop();
+          finalUri = recorder.uri;
+        } catch (recErr) {
+          console.error('Error stopping recorder:', recErr);
+        }
+      }
 
       if (finalUri) {
-        const fileName = `${Date.now()}.m4a`;
+        const fileName = `${Date.now()}.mp3`;
         setRecordedUri(finalUri);
         setRecordedFileName(fileName);
         setShowAudioPreview(true);
@@ -1167,6 +1319,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
       console.error('Failed to stop recording', error);
       Alert.alert('Error', 'No se pudo finalizar la grabación.');
       setIsRecording(false);
+      isStreamRecordingRef.current = false;
     }
   };
 
@@ -1179,6 +1332,7 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
     setRecordedFileName('');
     setShowAudioPreview(false);
     setStreamDuration(0);
+    isStreamRecordingRef.current = false;
     mp3RecorderRef.current.cancel();
   };
 
@@ -1206,12 +1360,14 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
         }
       }
 
-      const fileName = recordedFileName || `${Date.now()}.m4a`;
+      const fileName = recordedFileName && recordedFileName.toLowerCase().endsWith('.mp3')
+        ? recordedFileName
+        : `${Date.now()}.mp3`;
       const uriToSend = recordedUri;
       clearAudioPreview();
       setText(''); // Clear text input after sending
 
-      await sendMediaMessage(uriToSend, 'audio', fileName, '', 'audio/mp4');
+      await sendMediaMessage(uriToSend, 'audio', fileName, '', 'audio/mpeg');
     } catch (err) {
       console.error('Error sending recorded audio:', err);
       Alert.alert('Error', 'No se pudo enviar el mensaje de audio.');
@@ -1270,13 +1426,15 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
   }, [schedModalOpen]);
 
   const handleSelectProduct = (prod: Product) => {
-    const name = prod.title || prod.name || 'Producto';
-    const codeStr = prod.code ? ` (${prod.code})` : '';
-    const description = prod.description || prod.details || '';
-    const price = prod.price || prod.value || '';
-    const link = prod.url || prod.link || prod.video_url || '';
+    const name = prod.title || prod.name || prod.nombre || prod.titulo || 'Producto';
+    const code = prod.code || prod.codigo;
+    const codeStr = code ? ` (${code})` : '';
+    const description = prod.description || prod.details || prod.descripcion || prod.detalle || '';
+    const price = prod.price || prod.value || prod.precio || prod.valor || '';
+    const link = prod.url || prod.link || prod.enlace || prod.video_url || '';
     const builtArea = prod.built_area ? `*Área construida:* ${prod.built_area} m²\n` : '';
-    const mainImg = prod.main_image || prod.imageUrl || prod.image || prod.thumbnail;
+    const rawImg = prod.main_image || prod.imageUrl || prod.image_url || prod.image || prod.imagen || prod.foto || prod.thumbnail;
+    const mainImg = resolveCatalogImageUrl(rawImg, catalogUrl);
 
     // Formulate a beautiful product template message
     const formatted = `*🛍️ ${name}${codeStr}*\n\n${description ? `${description}\n\n` : ''}${builtArea}${price ? `*Precio:* $${price}\n` : ''}${link ? `\n🔗 Ver producto / video: ${link}` : ''}`;
@@ -2003,10 +2161,11 @@ export const MessageInput: React.FC<MessageInputProps> = ({ ticketId, contactId 
                 keyExtractor={(item, index) => (item.id ? item.id.toString() : index.toString())}
                 contentContainerStyle={{ padding: spacing.md }}
                 renderItem={({ item }) => {
-                  const name = item.name || item.title || 'Producto';
-                  const desc = item.description || item.details || 'Sin descripción';
-                  const price = item.price || item.value || '';
-                  const imgUrl = item.imageUrl || item.image || item.thumbnail;
+                  const name = item.name || item.title || item.nombre || item.titulo || 'Producto';
+                  const desc = item.description || item.details || item.descripcion || item.detalle || 'Sin descripción';
+                  const price = item.price || item.value || item.precio || item.valor || '';
+                  const rawImg = item.imageUrl || item.image_url || item.image || item.imagen || item.foto || item.main_image || item.thumbnail;
+                  const imgUrl = resolveCatalogImageUrl(rawImg, catalogUrl);
                   return (
                     <View style={[st.productCard, { backgroundColor: c.card, borderColor: c.border }]}>
                       {imgUrl ? (

@@ -1,15 +1,29 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Mp3Encoder } from './lame';
 
+const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
 function uint8ArrayToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const len = bytes.byteLength;
-  const chunkSize = 8192;
-  for (let i = 0; i < len; i += chunkSize) {
-    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
-    binary += String.fromCharCode.apply(null, chunk as any);
+  const len = bytes.length;
+  const parts: string[] = [];
+  let chunk = '';
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    chunk += BASE64_CHARS[b0 >> 2];
+    chunk += BASE64_CHARS[((b0 & 3) << 4) | (b1 >> 4)];
+    chunk += i + 1 < len ? BASE64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+    chunk += i + 2 < len ? BASE64_CHARS[b2 & 63] : '=';
+    if (chunk.length >= 8192) {
+      parts.push(chunk);
+      chunk = '';
+    }
   }
-  return btoa(binary);
+  if (chunk.length > 0) {
+    parts.push(chunk);
+  }
+  return parts.join('');
 }
 
 export class RealMp3Recorder {
@@ -22,7 +36,7 @@ export class RealMp3Recorder {
   }
 
   public init(sampleRate?: number) {
-    if (sampleRate) {
+    if (sampleRate && sampleRate > 0) {
       this.sampleRate = sampleRate;
     }
     this.encoder = new Mp3Encoder(1, this.sampleRate, 128);
@@ -30,15 +44,20 @@ export class RealMp3Recorder {
   }
 
   public processBuffer(pcmArrayBuffer: ArrayBuffer, bufferSampleRate?: number) {
+    if (!pcmArrayBuffer || pcmArrayBuffer.byteLength === 0) return;
     if (!this.encoder) {
       this.init(bufferSampleRate || this.sampleRate);
     }
     const samples = new Int16Array(pcmArrayBuffer);
     if (samples.length === 0) return;
 
-    const mp3chunk = this.encoder.encodeBuffer(samples);
-    if (mp3chunk && mp3chunk.length > 0) {
-      this.chunks.push(new Uint8Array(mp3chunk.buffer, mp3chunk.byteOffset, mp3chunk.length));
+    try {
+      const mp3chunk = this.encoder.encodeBuffer(samples);
+      if (mp3chunk && mp3chunk.length > 0) {
+        this.chunks.push(new Uint8Array(mp3chunk.buffer, mp3chunk.byteOffset, mp3chunk.length));
+      }
+    } catch (e) {
+      console.error('[RealMp3Recorder] encodeBuffer error:', e);
     }
   }
 
@@ -68,6 +87,9 @@ export class RealMp3Recorder {
       });
 
       return filePath;
+    } catch (err) {
+      console.error('[RealMp3Recorder] finalizeToFile error:', err);
+      return null;
     } finally {
       this.encoder = null;
       this.chunks = [];
@@ -79,3 +101,4 @@ export class RealMp3Recorder {
     this.chunks = [];
   }
 }
+
